@@ -1,9 +1,12 @@
-#include <settings.h>
-#include <main.h>
+#include <settings.hh>
+#include <main.hh>
+#include <sensor.hh>
+#include <sensor.cpp>
 #include <OneButton.h>
 #include <TM1637Display.h>
 
 TM1637Display display = TM1637Display(DISPLAY_CLOCK, DISPLAY_DATA);
+Sensor* sensor;
 
 static OneButton BTN_LEFT;
 static OneButton BTN_MAIN;
@@ -27,6 +30,8 @@ void setup() {
     BTN_MAIN.attachClick([]() { handleControlClick(Control::MAIN); });
     BTN_RIGHT.attachClick([]() { handleControlClick(Control::RIGHT); });
   }
+
+  sensor = new ToshibaSensor(TEMPERATURE_SENSOR);
 
   attachInterrupt(1, handleInterrupt, FALLING);
 
@@ -73,6 +78,8 @@ static void handleControlClick(Control control) {
       break;
     case Control::MAIN:
       clicked = 0;
+      Serial.print("Temperature: ");
+      Serial.println(sensor->getTemperature());
       break;
   }
 }
