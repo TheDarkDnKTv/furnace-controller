@@ -48,13 +48,50 @@ class Display {
             this->length = lenght;
 
             free(this->segments);
-            this->segments = static_cast<uint8_t*>(malloc(sizeof(uint8_t) * lenght));
+            this->segments = (uint8_t*) calloc(4, sizeof(uint8_t));
             if (this->segments == nullptr) {
                 Serial.println("ERR malloc failed: setSegments()");
                 return;
             }
 
             memcpy(this->segments, segments, sizeof(uint8_t) * lenght);
+        }
+        
+        void setDecimal(uint16_t number) {
+            this->offset = 0;
+            this->need_update = true;
+
+            if (number <= 0) {
+                free(this->segments);
+                this->segments = static_cast<uint8_t*>(malloc(sizeof(uint8_t) * 4));
+                for (uint8_t i = 0; i < 3; i++) {
+                    this->segments[i] = 0;
+                }
+
+                this->segments[3] = display.encodeDigit(0);
+                this->length = 4;
+                return;
+            }
+            
+            uint8_t i = 5;
+            uint8_t segments[i];
+            while (number > 0 && i > 0) {
+                segments[i - 1] = display.encodeDigit(number % 10);
+                number /= 10;
+                i--;
+            }
+
+            free(this->segments);
+            uint8_t len = 5 - i;
+            this->length = max(4, len);
+            this->segments = (uint8_t*) calloc(this->length, sizeof(uint8_t));
+            memcpy(
+                this->segments + (len < 4 ? 4 - len : 0),
+                segments + (len < 5 ? 5 - len : 0),
+                sizeof(uint8_t) * len
+            );
+
+            
         }
 
         void clear() {

@@ -20,6 +20,8 @@ enum Control {
 
 svoid handleControlClick(Control control);
 
+svoid handleChangeLongPress(bool increase = true);
+
 svoid handleInterrupt();
 
 svoid setState(State new_state);
@@ -27,3 +29,5 @@ svoid setState(State new_state);
 svoid updateInputs();
 
 svoid shutdownPeripherals();
+
+svoid updateScreen();

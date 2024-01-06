@@ -1,4 +1,10 @@
-#define SLEEP_TIMEOUT 5000 // Miliseconds
+#define SLEEP_TIMEOUT           5000 // Miliseconds
+#define LONG_PRESS_INTERVAL     400  // Milliseconds
+
+#define MIN_TEMP                25
+#define MAX_TEMP                200
+#define TEMP_CHANGE_STEP        5
+#define TEMP_CHANGE_STEP_FAST   25
 
 /* TERMISTOR */
 #define TRM_RESISTANCE_DELTA    2300    // Ohm per celsium
