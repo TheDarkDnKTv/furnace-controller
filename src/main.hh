@@ -1,10 +1,15 @@
 #include <Arduino.h>
 #include <avr/sleep.h>
 
+#define svoid static void
+
 enum State {
-    IDLE,
+    INIT,
     SLEEP,
-    IN_OPERATION
+
+    SETTING_TEMP,
+    SETTING_TIMER,
+    IN_OPERATION,
 };
 
 enum Control {
@@ -13,10 +18,12 @@ enum Control {
     RIGHT
 };
 
-static void handleControlClick(Control control);
+svoid handleControlClick(Control control);
 
-static void handleInterrupt();
+svoid handleInterrupt();
 
-static void hibernate();
+svoid setState(State new_state);
 
-static void updateInputs();
+svoid updateInputs();
+
+svoid shutdownPeripherals();

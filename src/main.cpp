@@ -2,10 +2,10 @@
 #include <main.hh>
 #include <sensor.hh>
 #include <sensor.cpp>
+#include <display.hh>
 #include <OneButton.h>
-#include <TM1637Display.h>
 
-TM1637Display display = TM1637Display(DISPLAY_CLOCK, DISPLAY_DATA);
+Display display = Display(1000);
 Sensor* sensor;
 
 static OneButton BTN_LEFT;
@@ -16,7 +16,6 @@ static bool action_perfomed;
 volatile State STATE;
 volatile uint32_t sleep_count_time;
 
-uint16_t clicked;
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT); // TODO remove
@@ -37,9 +36,9 @@ void setup() {
 
   Serial.begin(9600);
   display.setBrightness(7);
-  display.showNumberDec(clicked);
+  display.clear();
 
-  STATE = State::IDLE;
+  setState(State::INIT);
   sleep_count_time = millis();
 }
 
@@ -47,59 +46,83 @@ void loop() {
   uint32_t time = millis();
   updateInputs();
 
-  display.showNumberDec(clicked);
-
+  display.update(time);
   if (STATE != State::IN_OPERATION) {
     if (action_perfomed) {
       sleep_count_time = time;
     }
 
     if (time >= SLEEP_TIMEOUT + sleep_count_time) {
-      hibernate();
+      setState(State::SLEEP);
     }
   }
 }
 
-static void updateInputs() {
+svoid setState(State new_state) {
+  switch (STATE = new_state) {
+  case INIT: {
+    display.setSegments((const uint8_t[]) {
+      SEG_B | SEG_C,
+      SEG_A | SEG_B | SEG_G | SEG_E | SEG_D,
+      SEG_A | SEG_B | SEG_C | SEG_D | SEG_G,
+      SEG_F | SEG_G | SEG_B | SEG_C,
+      SEG_A | SEG_F | SEG_G | SEG_C | SEG_D
+    }, 5);
+    break;
+  }
+  case SETTING_TEMP: {
+    
+    break;
+  };
+
+  case SLEEP: {
+    shutdownPeripherals();
+    delay(50);
+    set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+    sleep_mode();
+    break;
+  }
+  
+  default:
+    break;
+  }
+}
+
+svoid updateInputs() {
   action_perfomed = false;
   BTN_LEFT.tick();
   BTN_MAIN.tick();
   BTN_RIGHT.tick();
 }
 
-static void handleControlClick(Control control) {
+svoid handleControlClick(Control control) {
   action_perfomed = true;
+  Serial.print("Control pressed: ");
+  Serial.println(control);
   switch (control) {
     case Control::LEFT:
-      clicked--;
       break;
     case Control::RIGHT:
-      clicked++;
       break;
-    case Control::MAIN:
-      clicked = 0;
-      Serial.print("Temperature: ");
-      Serial.println(sensor->getTemperature());
+    case Control::MAIN: {
+      
+
       break;
+    }
   }
 }
 
-static void handleInterrupt() {
+svoid handleInterrupt() {
   noInterrupts();
   if (STATE == State::SLEEP) {
-    STATE = State::IDLE;
     sleep_count_time = millis();
+    setState(State::INIT);
   }
 
   interrupts();
 }
 
-static void hibernate() {
-  STATE = State::SLEEP;
+svoid shutdownPeripherals() {
   display.clear();
   digitalWrite(LED_BUILTIN, 0);
-
-  delay(50);
-  set_sleep_mode(SLEEP_MODE_PWR_DOWN);
-  sleep_mode();
 }
