@@ -17,6 +17,8 @@ volatile State STATE;
 volatile uint32_t sleep_count_time;
 
 uint8_t temperature = MIN_TEMP;
+uint8_t time_hours = TIME_HOURS_DEFAULT;
+uint8_t time_minutes = TIME_MINUTES_DEFAULT;
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT); // TODO remove
@@ -30,7 +32,10 @@ void setup() {
     BTN_MAIN.attachClick([]() { handleControlClick(Control::MAIN); });
     BTN_RIGHT.attachClick([]() { handleControlClick(Control::RIGHT); });
 
-    BTN_MAIN.attachLongPressStart([]() { setState(State::INIT); });
+    BTN_MAIN.attachLongPressStart([]() { 
+      action_perfomed = true;
+      setState(State::INIT);
+    });
     BTN_LEFT.attachDuringLongPress([]() { handleChangeLongPress(false); });
     BTN_RIGHT.attachDuringLongPress([]() { handleChangeLongPress(true); });
 
@@ -82,7 +87,17 @@ svoid setState(State new_state) {
     temperature = MIN_TEMP;
     updateScreen();
     break;
-  };
+  }
+  case SETTING_TIMER_HOURS: {
+    time_hours = TIME_HOURS_DEFAULT;
+    time_minutes = TIME_MINUTES_DEFAULT;
+    updateScreen();
+    break;
+  }
+  case SETTING_TIMER_MINUTES: {
+    updateScreen();
+    break;
+  }
   case SLEEP: {
     shutdownPeripherals();
     delay(50);
@@ -100,6 +115,11 @@ svoid updateScreen() {
   switch (STATE) {
     case State::SETTING_TEMP: {
       display.setDecimal(temperature);
+      break;
+    }
+    case State::SETTING_TIMER_HOURS:
+    case State::SETTING_TIMER_MINUTES: {
+      display.setDecimal(time_hours * 100 + time_minutes, true);
       break;
     }
     default: break;
@@ -122,6 +142,12 @@ svoid handleControlClick(Control control) {
       if (STATE == State::SETTING_TEMP) {
         temperature = max(MIN_TEMP, temperature - TEMP_CHANGE_STEP);
         updateScreen();
+      } else if (STATE == State::SETTING_TIMER_HOURS) {
+        time_hours = max(TIME_HOURS_DEFAULT, time_hours - 1);
+        updateScreen();
+      } else if (STATE == State::SETTING_TIMER_MINUTES) {
+        time_minutes = max(TIME_MINUTES_DEFAULT, time_minutes - 1);
+        updateScreen();
       }
 
       break;
@@ -130,6 +156,12 @@ svoid handleControlClick(Control control) {
       if (STATE == State::SETTING_TEMP) {
         temperature = min(MAX_TEMP, temperature + TEMP_CHANGE_STEP);
         updateScreen();
+      } else if (STATE == State::SETTING_TIMER_HOURS) {
+        time_hours = min(TIME_HOURS_MAX, time_hours + 1);
+        updateScreen();
+      } else if (STATE == State::SETTING_TIMER_MINUTES) {
+        time_minutes = min(TIME_MINUTES_MAX, time_minutes + 1);
+        updateScreen();
       }
 
       break;
@@ -137,6 +169,12 @@ svoid handleControlClick(Control control) {
     case Control::MAIN: {
       if (STATE == State::INIT) {
         setState(State::SETTING_TEMP);
+      } else if (STATE == State::SETTING_TEMP) {
+        setState(State::SETTING_TIMER_HOURS);
+      } else if (STATE == State::SETTING_TIMER_HOURS) {
+        setState(State::SETTING_TIMER_MINUTES);
+      } else if (STATE == State::SETTING_TIMER_MINUTES) {
+        setState(State::IN_OPERATION);
       }
       break;
     }
@@ -144,16 +182,38 @@ svoid handleControlClick(Control control) {
 }
 
 svoid handleChangeLongPress(bool increase) {
-  if (STATE == State::SETTING_TEMP) {
-    if (increase) {
-      temperature = min(MAX_TEMP, temperature + TEMP_CHANGE_STEP_FAST);
-    } else {
-      temperature = max(MIN_TEMP, temperature - TEMP_CHANGE_STEP_FAST);
-    }
+  switch (STATE) {
+    case State::SETTING_TEMP: {
+      if (increase) {
+        temperature = min(MAX_TEMP, temperature + TEMP_CHANGE_STEP_FAST);
+      } else {
+        temperature = max(MIN_TEMP, temperature - TEMP_CHANGE_STEP_FAST);
+      }
 
-    updateScreen();
+      break;
+    }
+    case State::SETTING_TIMER_HOURS: {
+      if (increase) {
+        time_hours = min(TIME_HOURS_MAX, time_hours + TIME_CHANGE_STEP_FAST);
+      } else {
+        time_hours = max(TIME_HOURS_DEFAULT, time_hours - TIME_CHANGE_STEP_FAST);
+      }
+
+      break;
+    }
+    case State::SETTING_TIMER_MINUTES: {
+      if (increase) {
+        time_minutes = min(TIME_MINUTES_MAX, time_minutes + TIME_CHANGE_STEP_FAST);
+      } else {
+        time_minutes = max(TIME_MINUTES_DEFAULT, time_minutes - TIME_CHANGE_STEP_FAST);
+      }
+
+      break;
+    }
+    default: break;
   }
 
+  updateScreen();
   action_perfomed = true;
 }
 

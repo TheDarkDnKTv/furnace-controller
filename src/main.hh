@@ -8,7 +8,8 @@ enum State {
     SLEEP,
 
     SETTING_TEMP,
-    SETTING_TIMER,
+    SETTING_TIMER_HOURS,
+    SETTING_TIMER_MINUTES,
     IN_OPERATION,
 };
 

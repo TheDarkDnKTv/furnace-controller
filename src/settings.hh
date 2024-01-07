@@ -6,6 +6,12 @@
 #define TEMP_CHANGE_STEP        5
 #define TEMP_CHANGE_STEP_FAST   25
 
+#define TIME_HOURS_DEFAULT      0
+#define TIME_MINUTES_DEFAULT    0
+#define TIME_HOURS_MAX          99
+#define TIME_MINUTES_MAX        60
+#define TIME_CHANGE_STEP_FAST   10
+
 /* TERMISTOR */
 #define TRM_RESISTANCE_DELTA    2300    // Ohm per celsium
 #define TRM_BASE_RESISTANCE     10      // Base resistance, kOhm. Measure at some temperature and set resistance and that temperature
