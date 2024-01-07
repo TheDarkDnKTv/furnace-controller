@@ -40,3 +40,5 @@ svoid updateScreenBlink();
 svoid updateOperationControl(uint32_t* time);
 
 svoid updateOperationTimer(uint16_t time_passed);
+
+svoid setHeating(bool enabled);

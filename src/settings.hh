@@ -1,11 +1,12 @@
 #define SLEEP_TIMEOUT           5000 // Miliseconds
 #define LONG_PRESS_INTERVAL     400  // Milliseconds
 #define OP_CHECK_INTERVAL       500  // Milliseconds
+#define TERMOMETER_THRESHOLD    3    // Degrees celsuium
 
-#define MIN_TEMP                25
-#define MAX_TEMP                200
-#define TEMP_CHANGE_STEP        5
-#define TEMP_CHANGE_STEP_FAST   25
+#define MIN_TEMP                250     // 25.0
+#define MAX_TEMP                2000    // 200.0
+#define TEMP_CHANGE_STEP        50      // 5.0
+#define TEMP_CHANGE_STEP_FAST   250     // 25.0
 
 #define TIME_HOURS_DEFAULT      0
 #define TIME_MINUTES_DEFAULT    0

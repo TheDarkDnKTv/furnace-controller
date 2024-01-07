@@ -21,7 +21,7 @@ static bool did_blink_off = false;
 static uint32_t last_operation_time;
 static uint32_t last_timer_time;
 
-uint8_t temperature = MIN_TEMP;
+uint16_t temperature = MIN_TEMP;
 uint8_t time_hours = TIME_HOURS_DEFAULT;
 uint8_t time_minutes = TIME_MINUTES_DEFAULT;
 uint16_t operation_minute_countdown;
@@ -140,7 +140,7 @@ svoid setState(State new_state) {
 svoid updateScreen() {
   switch (STATE) {
     case State::SETTING_TEMP: {
-      display.setDecimal(temperature);
+      display.setDecimal(temperature / 10);
       break;
     }
     case State::IN_OPERATION:
@@ -284,14 +284,10 @@ svoid shutdownPeripherals() {
 }
 
 svoid stopOperation() {
-  if (STATE == State::IN_OPERATION) {
-    // Disabling hardware devices
-    digitalWrite(DRIVER_MAIN_RELAY, 0);
-    digitalWrite(DRIVER_FAN, 0);
-    digitalWrite(DRIVER_HEATER_TOP, 0);
-    digitalWrite(DRIVER_HEATER_BOTTOM, 0);
-    digitalWrite(HEATING_INDICATOR, 0);
-  }
+  // Disabling hardware devices
+  digitalWrite(DRIVER_MAIN_RELAY, 0);
+  digitalWrite(DRIVER_FAN, 0);
+  setHeating(0);
 
   setState(State::INIT);
 }
@@ -300,10 +296,19 @@ svoid updateOperationControl(uint32_t* time) {
   if (STATE == IN_OPERATION) {
     updateOperationTimer(*time - last_timer_time);
     last_timer_time = *time;
-
     if (*time - last_operation_time >= OP_CHECK_INTERVAL) {
+      uint32_t measured_temp = sensor->getTemperature();
+      
+      Serial.print("Temperature: ");
+      Serial.println(measured_temp / 10);
+
+      if (measured_temp >= temperature) {
+        setHeating(false);
+      } else if (measured_temp + TERMOMETER_THRESHOLD < temperature) {
+        setHeating(true);
+      }
+
       last_operation_time = *time;
-      // TODO hardware control
     }
   }
 }
@@ -325,7 +330,13 @@ svoid updateOperationTimer(uint16_t time_passed) {
 
         time_minutes--;
         time_passed = time_passed - operation_minute_countdown;
-        operation_minute_countdown = time_passed + (1000 /* TODO SECONDS FOR TESTING */); // Added rest of millis to times
+        operation_minute_countdown = time_passed + ((uint16_t)1000 * 60); // Added rest of millis to times
         updateScreen();
     }
+}
+
+svoid setHeating(bool enabled) {
+  digitalWrite(DRIVER_HEATER_TOP, enabled);
+  digitalWrite(DRIVER_HEATER_BOTTOM, enabled);
+  digitalWrite(HEATING_INDICATOR, enabled);
 }

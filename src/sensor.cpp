@@ -20,10 +20,10 @@ class ToshibaSensor : public Sensor {
 
             uint32_t resistance_kohm = (measured_voltage * TRM_DIVIDER_RESISTANCE) / (TRM_DIVIDER_REF_VOLTAGE - measured_voltage);
             
-            Serial.print(" resistance ");
+            Serial.print(" resistance "); // TODO remote it
             Serial.println(resistance_kohm);
-            
-            int16_t temperature = TRM_BASE_RES_DEGREES + ((resistance_kohm - TRM_BASE_RESISTANCE) * 1000 / TRM_RESISTANCE_DELTA);
+
+            int16_t temperature = floor((resistance_kohm * 1.0F / TRM_BASE_RESISTANCE) * TRM_BASE_RES_DEGREES);
             return max(0, temperature);
         }
 
