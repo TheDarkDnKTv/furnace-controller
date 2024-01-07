@@ -18,6 +18,7 @@ volatile uint32_t sleep_count_time;
 
 static uint32_t display_blink_time;
 static bool did_blink_off = false;
+static bool do_blink = true;
 static uint32_t last_operation_time;
 static uint32_t last_timer_time;
 
@@ -42,12 +43,24 @@ void setup() {
     BTN_MAIN.attachClick([]() { handleControlClick(Control::MAIN); });
     BTN_RIGHT.attachClick([]() { handleControlClick(Control::RIGHT); });
 
+    void (*noBlink)(void) = []() {
+      do_blink = false;
+    };
+
+    void (*doBlink)(void) = []() {
+      do_blink = true;
+    };
+
     BTN_MAIN.attachLongPressStart([]() { 
       action_perfomed = true;
       stopOperation();
     });
     BTN_LEFT.attachDuringLongPress([]() { handleChangeLongPress(false); });
+    BTN_LEFT.attachLongPressStart(noBlink);
+    BTN_LEFT.attachLongPressStop(doBlink);
     BTN_RIGHT.attachDuringLongPress([]() { handleChangeLongPress(true); });
+    BTN_RIGHT.attachLongPressStart(noBlink);
+    BTN_RIGHT.attachLongPressStop(doBlink);
 
     BTN_LEFT.setLongPressIntervalMs(LONG_PRESS_INTERVAL);
     BTN_RIGHT.setLongPressIntervalMs(LONG_PRESS_INTERVAL);
@@ -72,11 +85,11 @@ void loop() {
   updateOperationControl(&time);
 
   if (action_perfomed) {
-    display_blink_time = time;
+    resetBlinking();
     sleep_count_time = time;
   }
 
-  if (time - display_blink_time >= 500) { 
+  if ((do_blink || STATE == State::IN_OPERATION) && time - display_blink_time >= 500) { 
     display_blink_time = time;
     did_blink_off = !did_blink_off;
     updateScreen();
@@ -186,8 +199,7 @@ svoid updateInputs() {
 
 svoid handleControlClick(Control control) {
   action_perfomed = true;
-  Serial.print("Control pressed: ");
-  Serial.println(control);
+  resetBlinking();
   switch (control) {
     case Control::LEFT: {
       if (STATE == State::SETTING_TEMP) {
@@ -264,6 +276,7 @@ svoid handleChangeLongPress(bool increase) {
     default: break;
   }
 
+  resetBlinking();
   updateScreen();
   action_perfomed = true;
 }
@@ -339,4 +352,13 @@ svoid setHeating(bool enabled) {
   digitalWrite(DRIVER_HEATER_TOP, enabled);
   digitalWrite(DRIVER_HEATER_BOTTOM, enabled);
   digitalWrite(HEATING_INDICATOR, enabled);
+}
+
+svoid resetBlinking() {
+  if (STATE == State::IN_OPERATION) {
+    return;
+  }
+
+  did_blink_off = false;
+  display_blink_time = millis();
 }
