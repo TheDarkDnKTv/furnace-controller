@@ -16,12 +16,22 @@ static bool action_perfomed;
 volatile State STATE;
 volatile uint32_t sleep_count_time;
 
+static uint32_t display_blink_time;
+static bool did_blink_off = false;
+static uint32_t last_operation_time;
+static uint32_t last_timer_time;
+
 uint8_t temperature = MIN_TEMP;
 uint8_t time_hours = TIME_HOURS_DEFAULT;
 uint8_t time_minutes = TIME_MINUTES_DEFAULT;
+uint16_t operation_minute_countdown;
 
 void setup() {
-  pinMode(LED_BUILTIN, OUTPUT); // TODO remove
+  pinMode(DRIVER_MAIN_RELAY, OUTPUT);
+  pinMode(DRIVER_FAN, OUTPUT);
+  pinMode(DRIVER_HEATER_TOP, OUTPUT);
+  pinMode(DRIVER_HEATER_BOTTOM, OUTPUT);
+  pinMode(HEATING_INDICATOR, OUTPUT);
 
   {
     BTN_LEFT = OneButton(CONTROL_LEFT, true, true);
@@ -34,7 +44,7 @@ void setup() {
 
     BTN_MAIN.attachLongPressStart([]() { 
       action_perfomed = true;
-      setState(State::INIT);
+      stopOperation();
     });
     BTN_LEFT.attachDuringLongPress([]() { handleChangeLongPress(false); });
     BTN_RIGHT.attachDuringLongPress([]() { handleChangeLongPress(true); });
@@ -53,61 +63,77 @@ void setup() {
 
   setState(State::INIT);
   sleep_count_time = millis();
+  display_blink_time = millis();
 }
 
 void loop() {
   uint32_t time = millis();
   updateInputs();
+  updateOperationControl(&time);
 
-  display.update(time);
-  if (STATE != State::IN_OPERATION) {
-    if (action_perfomed) {
-      sleep_count_time = time;
-    }
+  if (action_perfomed) {
+    display_blink_time = time;
+    sleep_count_time = time;
+  }
 
-    if (time >= SLEEP_TIMEOUT + sleep_count_time) {
-      setState(State::SLEEP);
-    }
+  if (time - display_blink_time >= 500) { 
+    display_blink_time = time;
+    did_blink_off = !did_blink_off;
+    updateScreen();
+  }
+
+  display.update(&time);
+
+  if (STATE != State::IN_OPERATION && time >= SLEEP_TIMEOUT + sleep_count_time) {
+    setState(State::SLEEP);
   }
 }
 
 svoid setState(State new_state) {
   switch (STATE = new_state) {
-  case INIT: {
-    display.setSegments((const uint8_t[]) {
-      SEG_A | SEG_B | SEG_G | SEG_F,
-      SEG_G | SEG_C | SEG_D | SEG_E,
-      SEG_A | SEG_B | SEG_G | SEG_F,
-      SEG_G | SEG_C | SEG_D | SEG_E,
-      SEG_A | SEG_B | SEG_G | SEG_F
-    }, 5);
-    break;
-  }
-  case SETTING_TEMP: {
-    temperature = MIN_TEMP;
-    updateScreen();
-    break;
-  }
-  case SETTING_TIMER_HOURS: {
-    time_hours = TIME_HOURS_DEFAULT;
-    time_minutes = TIME_MINUTES_DEFAULT;
-    updateScreen();
-    break;
-  }
-  case SETTING_TIMER_MINUTES: {
-    updateScreen();
-    break;
-  }
-  case SLEEP: {
-    shutdownPeripherals();
-    delay(50);
-    set_sleep_mode(SLEEP_MODE_PWR_DOWN);
-    sleep_mode();
-    break;
-  }
-  
-  default:
-    break;
+    case INIT: {
+      display.setSegments((const uint8_t[]) {
+        SEG_A | SEG_B | SEG_G | SEG_F,
+        SEG_G | SEG_C | SEG_D | SEG_E,
+        SEG_A | SEG_B | SEG_G | SEG_F,
+        SEG_G | SEG_C | SEG_D | SEG_E,
+        SEG_A | SEG_B | SEG_G | SEG_F
+      }, 5);
+      break;
+    }
+    case SETTING_TEMP: {
+      temperature = MIN_TEMP;
+      updateScreen();
+      break;
+    }
+    case SETTING_TIMER_HOURS: {
+      time_hours = TIME_HOURS_DEFAULT;
+      time_minutes = TIME_MINUTES_DEFAULT;
+      updateScreen();
+      break;
+    }
+    case SETTING_TIMER_MINUTES: {
+      updateScreen();
+      break;
+    }
+    case SLEEP: {
+      shutdownPeripherals();
+      delay(50);
+      set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+      sleep_mode();
+      break;
+    }
+    case IN_OPERATION: {
+      if (time_hours <= 0 && time_minutes <= 0) {
+        setState(INIT);
+      }
+
+      last_timer_time = last_operation_time = millis();
+      operation_minute_countdown = 0;
+      digitalWrite(DRIVER_MAIN_RELAY, 1);
+      digitalWrite(DRIVER_FAN, 1);
+      break;
+    }
   }
 }
 
@@ -117,12 +143,37 @@ svoid updateScreen() {
       display.setDecimal(temperature);
       break;
     }
+    case State::IN_OPERATION:
     case State::SETTING_TIMER_HOURS:
     case State::SETTING_TIMER_MINUTES: {
       display.setDecimal(time_hours * 100 + time_minutes, true);
       break;
     }
     default: break;
+  }
+
+  updateScreenBlink();
+}
+
+svoid updateScreenBlink() {
+  if (did_blink_off) {
+    switch (STATE) {
+      case State::SETTING_TIMER_HOURS: {
+        display.updateDigitSegments(0, 0);
+        display.updateDigitSegments(0, 1);
+        break;
+      }
+      case State::SETTING_TIMER_MINUTES: {
+        display.updateDigitSegments(0, 2);
+        display.updateDigitSegments(0, 3);
+        break;
+      }
+      case State::IN_OPERATION: {
+        display.updateDigitSegments(SEG_DP, 1, false);
+        break;
+      }
+      default: break;
+    }
   }
 }
 
@@ -230,4 +281,51 @@ svoid handleInterrupt() {
 svoid shutdownPeripherals() {
   display.clear();
   digitalWrite(LED_BUILTIN, 0);
+}
+
+svoid stopOperation() {
+  if (STATE == State::IN_OPERATION) {
+    // Disabling hardware devices
+    digitalWrite(DRIVER_MAIN_RELAY, 0);
+    digitalWrite(DRIVER_FAN, 0);
+    digitalWrite(DRIVER_HEATER_TOP, 0);
+    digitalWrite(DRIVER_HEATER_BOTTOM, 0);
+    digitalWrite(HEATING_INDICATOR, 0);
+  }
+
+  setState(State::INIT);
+}
+
+svoid updateOperationControl(uint32_t* time) {
+  if (STATE == IN_OPERATION) {
+    updateOperationTimer(*time - last_timer_time);
+    last_timer_time = *time;
+
+    if (*time - last_operation_time >= OP_CHECK_INTERVAL) {
+      last_operation_time = *time;
+      // TODO hardware control
+    }
+  }
+}
+
+svoid updateOperationTimer(uint16_t time_passed) {
+    if (time_passed <= operation_minute_countdown) {
+      operation_minute_countdown -= time_passed;
+    } else {
+        if (time_minutes <= 0) {
+          if (time_hours <= 0) {
+            action_perfomed = true;
+            stopOperation();
+            return;
+          }
+
+          time_hours--;
+          time_minutes = 60; // Minutes in one hours
+        }
+
+        time_minutes--;
+        time_passed = time_passed - operation_minute_countdown;
+        operation_minute_countdown = time_passed + (1000 /* TODO SECONDS FOR TESTING */); // Added rest of millis to times
+        updateScreen();
+    }
 }

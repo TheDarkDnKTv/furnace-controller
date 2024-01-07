@@ -1,5 +1,6 @@
 #define SLEEP_TIMEOUT           5000 // Miliseconds
 #define LONG_PRESS_INTERVAL     400  // Milliseconds
+#define OP_CHECK_INTERVAL       500  // Milliseconds
 
 #define MIN_TEMP                25
 #define MAX_TEMP                200
@@ -32,5 +33,7 @@
 #define DRIVER_FAN              8
 #define DRIVER_HEATER_TOP       9
 #define DRIVER_HEATER_BOTTOM    10
+
+#define HEATING_INDICATOR       LED_BUILTIN
 
 #define TEMPERATURE_SENSOR      A7

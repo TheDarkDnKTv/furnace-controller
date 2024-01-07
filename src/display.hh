@@ -1,22 +1,6 @@
 #include <TM1637Display.h>
 #include <settings.hh>
 
-#define DIGIT_0 0b1000
-#define DIGIT_1 0b0100
-#define DIGIT_2 0b0010
-#define DIGIT_3 0b0001
-
-#define DIGIT_ALL \
-    DIGIT_0 |\
-    DIGIT_1 |\
-    DIGIT_2 |\
-    DIGIT_3
-
-
-const uint8_t SEGMENTS_DISABLED[] = {
-    0, 0, 0, 0
-};
-
 static inline void arrcpy(const uint8_t* src, uint8_t* dest, uint8_t count, uint8_t src_pos = 0, uint8_t dest_pos = 0) {
     memcpy(
         dest + dest_pos,
@@ -39,15 +23,15 @@ class Display {
             free(this->segments);
         };
 
-        void update(uint32_t time) {
+        void update(uint32_t* time) {
             if (segments != nullptr) {
                 if (need_update) {
                     offset = 0;
                     need_update = false;
 
                     display.setSegments(segments, length);
-                } else if (length > 4 && time >= last_update_time + shift_interval) {
-                    last_update_time = time;
+                } else if (length > 4 && *time - last_update_time >= shift_interval) {
+                    last_update_time = *time;
                     if ((++offset + 4) > length) {
                         offset = 0;
                     }
@@ -111,7 +95,20 @@ class Display {
             );
         }
 
-        // void 
+        /**
+         * @param set if true (default) will set value, otherwise use OR operation
+        */
+        void updateDigitSegments(uint8_t segments, uint8_t position, bool set = true) {
+            if (position < this->length) {
+                this->need_update = true;
+                this->segments[position] = set ? segments : this->segments[position] | segments;
+            } else {
+                Serial.print("ERR updateDigitSegments position is invalid: ");
+                Serial.print(position);
+                Serial.print(" expected less than: ");
+                Serial.println(this->length);
+            }
+        }
 
         void clear() {
             free(segments);

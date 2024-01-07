@@ -31,4 +31,12 @@ svoid updateInputs();
 
 svoid shutdownPeripherals();
 
+svoid stopOperation();
+
 svoid updateScreen();
+
+svoid updateScreenBlink();
+
+svoid updateOperationControl(uint32_t* time);
+
+svoid updateOperationTimer(uint16_t time_passed);
