@@ -1,6 +1,19 @@
 #include <Arduino.h>
-#include <settings.hh>
+#include <avr/pgmspace.h>
 #include <sensor.hh>
+
+#define TEMPERATURE_TABLE_STEP  -50     // -5.0C
+#define TEMPERATURE_MAX         2000    // 200.0C
+#define TEMPERATURE_MIN         250     // 25.0C
+
+// 25 - 200 C
+const uint16_t termo_table[] PROGMEM = {
+    1012, 1011, 1009, 1008, 1006, 1004, 1002, 1000,
+    997, 994, 990, 986, 982, 976, 970, 963,
+    955, 946, 935, 922, 908, 891, 872, 850,
+    824, 795, 763, 726, 685, 640, 591, 540,
+    486, 431, 376, 323
+};
 
 class ToshibaSensor : public Sensor {
     public:
@@ -8,29 +21,52 @@ class ToshibaSensor : public Sensor {
             pinMode(pin, INPUT);
         }
 
-        /*
-        U(out) = U(in) * (R2 / (R1 + R2)) =>
-        R2 = ( U(out) * R1 ) / ( U(in) - U(out) )
+        /**
+         * https://aterlux.ru/article/ntcresistor
         */
-        uint32_t getTemperature() override {
-            uint32_t measured_voltage = this->measureVoltage();
+        int16_t getTemperature() override {
+            uint8_t high_idx = 0;
+            uint8_t low_idx = (sizeof(termo_table) / sizeof(termo_table[0])) - 1;
+            uint16_t lowest_value = getTempTableValue(low_idx);
+            uint16_t cummulitive_reading = analogRead(this->pin);
+            if (cummulitive_reading <= lowest_value) {
+                return TEMPERATURE_MIN;
+            }
 
-            Serial.print("\n voltage "); // TODO remove it
-            Serial.println(measured_voltage);
+            uint16_t highest_value = getTempTableValue(0);
+            if (cummulitive_reading >= highest_value) {
+                return TEMPERATURE_MAX;
+            }
 
-            uint32_t resistance_kohm = (measured_voltage * TRM_DIVIDER_RESISTANCE) / (TRM_DIVIDER_REF_VOLTAGE - measured_voltage);
-            
-            Serial.print(" resistance "); // TODO remote it
-            Serial.println(resistance_kohm);
+            // Binary search
+            while ((low_idx - high_idx) > 1) {
+                uint8_t m = (high_idx + low_idx) >> 1;
+                uint16_t mid = getTempTableValue(m);
+                if (cummulitive_reading > mid) {
+                    low_idx = m;
+                } else {
+                    high_idx = m;
+                }
+            }
 
-            int16_t temperature = floor((resistance_kohm * 1.0F / TRM_BASE_RESISTANCE) * TRM_BASE_RES_DEGREES);
-            return max(0, temperature);
+            uint16_t vl = getTempTableValue(high_idx);
+            if (cummulitive_reading >= vl) {
+                return high_idx * TEMPERATURE_TABLE_STEP + TEMPERATURE_MAX;
+            }
+
+            uint16_t vr = getTempTableValue(low_idx);
+            uint16_t vd = vl - vr;
+            int16_t result = TEMPERATURE_MAX + low_idx * TEMPERATURE_TABLE_STEP; 
+            if (vd) {
+                // Linear interpolation
+                result -= ((TEMPERATURE_TABLE_STEP * (int32_t)(cummulitive_reading - vr) + (vd >> 1)) / vd);
+            }
+
+            return result;
         }
 
     private:
-        inline uint32_t measureVoltage() {
-            const uint16_t pin_value = analogRead(this->pin);
-            const float mod = TRM_DIVIDER_REF_VOLTAGE / 1023.0;
-            return (uint32_t) ceil((float) pin_value * mod);
+        inline uint16_t getTempTableValue(uint8_t idx) {
+            return pgm_read_word(&termo_table[idx]);
         }
 };

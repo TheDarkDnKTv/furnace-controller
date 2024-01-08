@@ -16,6 +16,11 @@ static bool action_perfomed;
 volatile State STATE;
 volatile uint32_t sleep_count_time;
 
+volatile uint16_t sync_period = 0;
+volatile uint32_t temp_sync_last_time = 0;
+volatile uint16_t termoresistor_temp = 0;
+volatile bool do_check_temp = false;
+
 static uint32_t display_blink_time;
 static bool did_blink_off = false;
 static bool do_blink = true;
@@ -33,6 +38,7 @@ void setup() {
   pinMode(DRIVER_HEATER_TOP, OUTPUT);
   pinMode(DRIVER_HEATER_BOTTOM, OUTPUT);
   pinMode(HEATING_INDICATOR, OUTPUT);
+  pinMode(TRM_SYNC, INPUT);
 
   {
     BTN_LEFT = OneButton(CONTROL_LEFT, true, true);
@@ -68,6 +74,7 @@ void setup() {
 
   sensor = new ToshibaSensor(TEMPERATURE_SENSOR);
 
+  attachInterrupt(0, handleSync, FALLING);
   attachInterrupt(1, handleInterrupt, FALLING);
 
   Serial.begin(9600);
@@ -81,6 +88,12 @@ void setup() {
 
 void loop() {
   uint32_t time = millis();
+  // Need to check temp ASAP
+  if (STATE == State::IN_OPERATION && do_check_temp && time - temp_sync_last_time >= sync_period) {
+    termoresistor_temp = sensor->getTemperature();
+    do_check_temp = false;
+  }
+
   updateInputs();
   updateOperationControl(&time);
 
@@ -285,15 +298,38 @@ svoid handleInterrupt() {
   noInterrupts();
   if (STATE == State::SLEEP) {
     sleep_count_time = millis();
+    attachInterrupt(0, handleSync, FALLING);
     setState(State::INIT);
   }
 
   interrupts();
 }
 
+svoid handleSync() {
+  static uint8_t sync_tryies = 4;
+  if (sync_tryies == 0 || temp_sync_last_time <= 0) {
+    temp_sync_last_time = millis();
+    do_check_temp = true;
+    return;
+  }
+
+  if (sync_tryies-- > 0) {
+    sync_period += (millis() - temp_sync_last_time);
+    temp_sync_last_time = millis();
+    if (sync_tryies <= 0) {
+      sync_period /= 4;
+      Serial.print("Temperature sync done, period: ");
+      Serial.print(sync_period);
+      Serial.println("ms");
+      sync_period /= 2 * 3; // 1/3 of half period
+    }
+  }
+}
+
 svoid shutdownPeripherals() {
   display.clear();
   digitalWrite(LED_BUILTIN, 0);
+  detachInterrupt(0);
 }
 
 svoid stopOperation() {
@@ -310,14 +346,10 @@ svoid updateOperationControl(uint32_t* time) {
     updateOperationTimer(*time - last_timer_time);
     last_timer_time = *time;
     if (*time - last_operation_time >= OP_CHECK_INTERVAL) {
-      uint32_t measured_temp = sensor->getTemperature();
-      
-      Serial.print("Temperature: ");
-      Serial.println(measured_temp / 10);
-
-      if (measured_temp >= temperature) {
+      // TODO add proper control using relay method
+      if (termoresistor_temp >= temperature) {
         setHeating(false);
-      } else if (measured_temp + TERMOMETER_THRESHOLD < temperature) {
+      } else if (termoresistor_temp + TERMOMETER_THRESHOLD < temperature) {
         setHeating(true);
       }
 

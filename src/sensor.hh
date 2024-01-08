@@ -14,7 +14,7 @@ class Sensor {
              * Get current temperature in degrees celsium
              * @return temperature
              */
-            virtual uint32_t getTemperature();
+            virtual int16_t getTemperature();
 
         protected:
             uint8_t pin;

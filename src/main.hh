@@ -25,6 +25,8 @@ svoid handleChangeLongPress(bool increase = true);
 
 svoid handleInterrupt();
 
+svoid handleSync();
+
 svoid setState(State new_state);
 
 svoid updateInputs();
