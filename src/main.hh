@@ -45,4 +45,6 @@ svoid updateOperationTimer(uint16_t time_passed);
 
 svoid setHeating(bool enabled);
 
+svoid setAuxiliaryHardware(bool enabled);
+
 svoid resetBlinking();

@@ -15,20 +15,23 @@
 #define TIME_CHANGE_STEP_FAST   10
 
 /* PINS */
-#define TRM_SYNC            2
-
 #define CONTROL_RIGHT       7
-#define CONTROL_CENTER      3
+#define CONTROL_CENTER      3 // Interruptable PIN only
 #define CONTROL_LEFT        4
 
 #define DISPLAY_CLOCK       5
 #define DISPLAY_DATA        6
 
+#define TEMPERATURE_SYNC        2  // Interruptable PIN only
 #define DRIVER_MAIN_RELAY       8
 #define DRIVER_FAN              9
 #define DRIVER_HEATER_TOP       10
 #define DRIVER_HEATER_BOTTOM    11
+#define POWER_STANDBY           12
 
 #define HEATING_INDICATOR       LED_BUILTIN
 
 #define TEMPERATURE_SENSOR      A6
+
+// Define if DEBUG mode
+// #define DEBUG true

@@ -52,7 +52,9 @@ class Display {
             free(this->segments);
             this->segments = (uint8_t*) calloc(4, sizeof(uint8_t));
             if (this->segments == nullptr) {
-                Serial.println("ERR malloc failed: setSegments()");
+                #ifdef DEBUG
+                    Serial.println("ERR malloc failed: setSegments()");
+                #endif
                 return;
             }
 
@@ -103,10 +105,12 @@ class Display {
                 this->need_update = true;
                 this->segments[position] = set ? segments : this->segments[position] | segments;
             } else {
-                Serial.print("ERR updateDigitSegments position is invalid: ");
-                Serial.print(position);
-                Serial.print(" expected less than: ");
-                Serial.println(this->length);
+                #ifdef DEBUG
+                    Serial.print("ERR updateDigitSegments position is invalid: ");
+                    Serial.print(position);
+                    Serial.print(" expected less than: ");
+                    Serial.println(this->length);
+                #endif
             }
         }
 

@@ -5,6 +5,16 @@
 #include <display.hh>
 #include <OneButton.h>
 
+/**
+ * Hardware controller for TOSHIBA furnace
+ * 
+ * All settings are located in settings.hh file
+ * 
+ * @version 1.0
+ * @author TheDarkDnKTv
+ * @since 2024/01/09
+*/
+
 Display display = Display(1000);
 Sensor* sensor;
 
@@ -38,7 +48,8 @@ void setup() {
   pinMode(DRIVER_HEATER_TOP, OUTPUT);
   pinMode(DRIVER_HEATER_BOTTOM, OUTPUT);
   pinMode(HEATING_INDICATOR, OUTPUT);
-  pinMode(TRM_SYNC, INPUT);
+  pinMode(TEMPERATURE_SYNC, INPUT);
+  pinMode(POWER_STANDBY, INPUT);
 
   {
     BTN_LEFT = OneButton(CONTROL_LEFT, true, true);
@@ -77,7 +88,10 @@ void setup() {
   attachInterrupt(0, handleSync, FALLING);
   attachInterrupt(1, handleInterrupt, FALLING);
 
-  Serial.begin(9600);
+  #ifdef DEBUG
+    Serial.begin(9600);
+  #endif
+  
   display.setBrightness(7);
   display.clear();
 
@@ -156,8 +170,7 @@ svoid setState(State new_state) {
 
       last_timer_time = last_operation_time = millis();
       operation_minute_countdown = 0;
-      digitalWrite(DRIVER_MAIN_RELAY, 1);
-      digitalWrite(DRIVER_FAN, 1);
+      setAuxiliaryHardware(1);
       break;
     }
   }
@@ -318,9 +331,11 @@ svoid handleSync() {
     temp_sync_last_time = millis();
     if (sync_tryies <= 0) {
       sync_period /= 4;
-      Serial.print("Temperature sync done, period: ");
-      Serial.print(sync_period);
-      Serial.println("ms");
+      #ifdef DEBUG
+        Serial.print("Temperature sync done, period: ");
+        Serial.print(sync_period);
+        Serial.println("ms");
+      #endif
       sync_period /= 2 * 3; // 1/3 of half period
     }
   }
@@ -334,8 +349,7 @@ svoid shutdownPeripherals() {
 
 svoid stopOperation() {
   // Disabling hardware devices
-  digitalWrite(DRIVER_MAIN_RELAY, 0);
-  digitalWrite(DRIVER_FAN, 0);
+  setAuxiliaryHardware(0);
   setHeating(0);
 
   setState(State::INIT);
@@ -384,6 +398,12 @@ svoid setHeating(bool enabled) {
   digitalWrite(DRIVER_HEATER_TOP, enabled);
   digitalWrite(DRIVER_HEATER_BOTTOM, enabled);
   digitalWrite(HEATING_INDICATOR, enabled);
+}
+
+svoid setAuxiliaryHardware(bool enabled) {
+  digitalWrite(DRIVER_MAIN_RELAY, enabled);
+  digitalWrite(DRIVER_FAN, enabled);
+  digitalWrite(POWER_STANDBY, enabled);
 }
 
 svoid resetBlinking() {
