@@ -26,6 +26,7 @@ static bool action_perfomed;
 volatile State STATE;
 volatile uint32_t sleep_count_time;
 
+volatile uint8_t sync_tryies = 4;
 volatile uint16_t sync_period = 0;
 volatile uint32_t temp_sync_last_time = 0;
 volatile uint16_t termoresistor_temp = 0;
@@ -37,6 +38,8 @@ static bool do_blink = true;
 static uint32_t last_operation_time;
 static uint32_t last_timer_time;
 static bool showing_time = true;
+
+static uint32_t last_fan_switch;
 
 uint16_t temperature = MIN_TEMP;
 uint8_t time_hours = TIME_HOURS_DEFAULT;
@@ -112,7 +115,7 @@ void setup() {
 void loop() {
   uint32_t time = millis();
   // Need to check temp ASAP
-  if (STATE == State::IN_OPERATION && do_check_temp && time - temp_sync_last_time >= sync_period) {
+  if ((STATE == IN_OPERATION || STATE == COOLING) && do_check_temp && time - temp_sync_last_time >= sync_period) {
     termoresistor_temp = sensor->getTemperature();
     do_check_temp = false;
   }
@@ -142,6 +145,7 @@ svoid setState(State new_state) {
   switch (STATE = new_state) {
     case INIT: {
       showing_time = true;
+      setAuxiliaryHardware(0);
       display.setSegments((const uint8_t[]) {
         SEG_A | SEG_B | SEG_G | SEG_F,
         SEG_G | SEG_C | SEG_D | SEG_E,
@@ -183,6 +187,16 @@ svoid setState(State new_state) {
       setAuxiliaryHardware(1);
       break;
     }
+    case COOLING: {
+      display.setSegments((const uint8_t[]) {
+        SEG_A | SEG_E | SEG_F | SEG_D,
+        SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F,
+        SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F,
+        SEG_E | SEG_F | SEG_D
+      }, 4);
+      setCooling(1);
+      break;
+    }
   }
 }
 
@@ -194,11 +208,6 @@ svoid updateScreen() {
     }
     case State::IN_OPERATION:
       if (!showing_time) {
-        #ifdef DEBUG
-          Serial.print("Display temp: ");
-          Serial.println(termoresistor_temp);
-        #endif
-
         display.setFloat(termoresistor_temp / 10.0);
         return;
       }
@@ -277,7 +286,9 @@ svoid handleControlClick(Control control) {
     }
     case Control::MAIN: {
       if (STATE == State::INIT) {
-        setState(State::SETTING_TEMP);
+        if (sync_tryies <= 0) {
+          setState(State::SETTING_TEMP);
+        }
       } else if (STATE == State::SETTING_TEMP) {
         setState(State::SETTING_TIMER_HOURS);
       } else if (STATE == State::SETTING_TIMER_HOURS) {
@@ -339,7 +350,6 @@ svoid handleInterrupt() {
 }
 
 svoid handleSync() {
-  static uint8_t sync_tryies = 4;
   if (sync_tryies == 0 || temp_sync_last_time <= 0) {
     temp_sync_last_time = millis();
     do_check_temp = true;
@@ -369,30 +379,69 @@ svoid shutdownPeripherals() {
 
 svoid stopOperation() {
   // Disabling hardware devices
-  setAuxiliaryHardware(0);
   setHeating(0);
 
-  setState(State::INIT);
+  if (termoresistor_temp > NEED_COOLING_FROM) {
+    setState(State::COOLING);  
+  } else {
+    setAuxiliaryHardware(0);
+    setState(State::INIT);
+  }
+}
+
+static inline int8_t signum(int16_t val) {
+  return val > 0 ? 1 : (val < 0 ? -1 : 0);
 }
 
 svoid updateOperationControl(uint32_t* time) {
   if (STATE == IN_OPERATION) {
+    if (millis() - last_fan_switch >= 30) {
+      last_fan_switch = millis() - 15;
+      digitalWrite(DRIVER_FAN, !digitalRead(DRIVER_FAN));
+    }
+
     updateOperationTimer(*time - last_timer_time);
     last_timer_time = *time;
     if (*time - last_operation_time >= OP_CHECK_INTERVAL) {
       if (!showing_time) {
         updateScreen();
       }
+      
+      static uint16_t previous_temperature = termoresistor_temp;
+      float rate = ((int32_t)termoresistor_temp - (int32_t)previous_temperature) / (OP_CHECK_INTERVAL / 1000.0);
+      previous_temperature = termoresistor_temp;
+      float change_mod = rate < 0 ? (OP_TEMP_CONTROL_RATIO / 10.0) : OP_TEMP_CONTROL_RATIO; // cooling way slower than heating
+      int16_t expected_temp = termoresistor_temp + (int16_t) round(rate * change_mod);
+      int8_t signal = (
+        (int8_t)signum(expected_temp - (int16_t)temperature - OP_TEMP_HYSTERESIS / 2) +
+        (int8_t)signum(expected_temp - (int16_t)temperature + OP_TEMP_HYSTERESIS / 2)
+      ) / 2;
 
-      // TODO add proper control using relay method
-      if (termoresistor_temp >= temperature) {
+      #ifdef DEBUG
+        Serial.print("Rate: ");
+        Serial.println(rate);
+      #endif
+
+      if (signal == 1) {
         setHeating(false);
-      } else if (termoresistor_temp + TERMOMETER_THRESHOLD < temperature) {
+      } else if (signal == -1) {
         setHeating(true);
       }
 
       last_operation_time = *time;
     }
+  } else if (STATE == COOLING) {
+    if (termoresistor_temp <= NEED_COOLING_FROM) {
+      setCooling(0);
+      setState(INIT);
+    } else {
+      #ifdef DEBUG
+      Serial.print("Cooling: ");
+      Serial.println(termoresistor_temp);
+      #endif
+    }
+
+    action_perfomed = true;
   }
 }
 
@@ -419,6 +468,11 @@ svoid updateOperationTimer(uint16_t time_passed) {
 }
 
 svoid setHeating(bool enabled) {
+  #ifdef DEBUG
+    Serial.print("Heating: ");
+    Serial.println(enabled);
+  #endif
+
   digitalWrite(DRIVER_HEATER_TOP, enabled);
   digitalWrite(DRIVER_HEATER_BOTTOM, enabled);
   digitalWrite(HEATING_INDICATOR, enabled);
@@ -426,8 +480,8 @@ svoid setHeating(bool enabled) {
 
 svoid setAuxiliaryHardware(bool enabled) {
   digitalWrite(DRIVER_MAIN_RELAY, enabled);
-  digitalWrite(DRIVER_FAN, enabled);
   digitalWrite(POWER_STANDBY, enabled);
+  digitalWrite(DRIVER_FAN, enabled);
 }
 
 svoid resetBlinking() {
@@ -437,4 +491,10 @@ svoid resetBlinking() {
 
   did_blink_off = false;
   display_blink_time = millis();
+}
+
+svoid setCooling(bool enabled) {
+  digitalWrite(DRIVER_MAIN_RELAY, 0);
+  digitalWrite(POWER_STANDBY, enabled);
+  digitalWrite(DRIVER_FAN, enabled);
 }

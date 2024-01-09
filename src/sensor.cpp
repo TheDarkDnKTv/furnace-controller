@@ -5,6 +5,7 @@
 #define TEMPERATURE_TABLE_STEP  -50     // -5.0C
 #define TEMPERATURE_MAX         2000    // 200.0C
 #define TEMPERATURE_MIN         0       // 0.0C
+#define READING_COUNT           8
 
 // 0 - 200 C
 const uint16_t termo_table[] PROGMEM = {
@@ -63,10 +64,29 @@ class ToshibaSensor : public Sensor {
                 result -= ((TEMPERATURE_TABLE_STEP * (int32_t)(cummulitive_reading - vr) + (vd >> 1)) / vd);
             }
 
+            this->readings[reading++] = result;
+            if (reading >= READING_COUNT) {
+                reading_init = true;
+                reading = 0;
+            }
+
+            if (reading_init) {
+                result = 0;
+                for (auto i: readings) {
+                    result += i;
+                }
+
+                return result / READING_COUNT;
+            }
+
             return result;
         }
 
     private:
+        uint8_t reading = 0;
+        int16_t readings[READING_COUNT];
+        bool reading_init = false;
+    
         inline uint16_t getTempTableValue(uint8_t idx) {
             return pgm_read_word(&termo_table[idx]);
         }

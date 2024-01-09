@@ -1,7 +1,9 @@
 #define SLEEP_TIMEOUT           20000 // Milliseconds
 #define LONG_PRESS_INTERVAL     400   // Milliseconds
-#define OP_CHECK_INTERVAL       500   // Milliseconds
-#define TERMOMETER_THRESHOLD    30    // Degrees celsuium (3.0C)
+#define OP_CHECK_INTERVAL       3000  // Milliseconds
+#define OP_TEMP_HYSTERESIS      30    // Degrees celsuium (1.5C)
+#define OP_TEMP_CONTROL_RATIO   200.0   // k (relay control algorithm)
+#define NEED_COOLING_FROM       500   // If temp more than (50.0C) will cooldown 
 
 #define MIN_TEMP                250     // 25.0
 #define MAX_TEMP                2000    // 200.0
@@ -32,6 +34,8 @@
 #define HEATING_INDICATOR       LED_BUILTIN
 
 #define TEMPERATURE_SENSOR      A6
+
+
 
 // Define if DEBUG mode
 // #define DEBUG true

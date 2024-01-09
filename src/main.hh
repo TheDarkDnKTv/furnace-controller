@@ -11,6 +11,7 @@ enum State {
     SETTING_TIMER_HOURS,
     SETTING_TIMER_MINUTES,
     IN_OPERATION,
+    COOLING
 };
 
 enum Control {
@@ -46,5 +47,7 @@ svoid updateOperationTimer(uint16_t time_passed);
 svoid setHeating(bool enabled);
 
 svoid setAuxiliaryHardware(bool enabled);
+
+svoid setCooling(bool enabled);
 
 svoid resetBlinking();
