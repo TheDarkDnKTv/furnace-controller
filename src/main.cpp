@@ -36,6 +36,7 @@ static bool did_blink_off = false;
 static bool do_blink = true;
 static uint32_t last_operation_time;
 static uint32_t last_timer_time;
+static bool showing_time = true;
 
 uint16_t temperature = MIN_TEMP;
 uint8_t time_hours = TIME_HOURS_DEFAULT;
@@ -81,6 +82,14 @@ void setup() {
 
     BTN_LEFT.setLongPressIntervalMs(LONG_PRESS_INTERVAL);
     BTN_RIGHT.setLongPressIntervalMs(LONG_PRESS_INTERVAL);
+
+    BTN_MAIN.attachDoubleClick([]{
+      if (STATE == IN_OPERATION) {
+        showing_time = !showing_time;
+      }
+    });
+
+    BTN_MAIN.setClickMs(150);
   }
 
   sensor = new ToshibaSensor(TEMPERATURE_SENSOR);
@@ -132,6 +141,7 @@ void loop() {
 svoid setState(State new_state) {
   switch (STATE = new_state) {
     case INIT: {
+      showing_time = true;
       display.setSegments((const uint8_t[]) {
         SEG_A | SEG_B | SEG_G | SEG_F,
         SEG_G | SEG_C | SEG_D | SEG_E,
@@ -183,6 +193,15 @@ svoid updateScreen() {
       break;
     }
     case State::IN_OPERATION:
+      if (!showing_time) {
+        #ifdef DEBUG
+          Serial.print("Display temp: ");
+          Serial.println(termoresistor_temp);
+        #endif
+
+        display.setFloat(termoresistor_temp / 10.0);
+        return;
+      }
     case State::SETTING_TIMER_HOURS:
     case State::SETTING_TIMER_MINUTES: {
       display.setDecimal(time_hours * 100 + time_minutes, true);
@@ -208,7 +227,8 @@ svoid updateScreenBlink() {
         break;
       }
       case State::IN_OPERATION: {
-        display.updateDigitSegments(SEG_DP, 1, false);
+        if (showing_time)
+          display.updateDigitSegments(SEG_DP, 1, false);
         break;
       }
       default: break;
@@ -360,6 +380,10 @@ svoid updateOperationControl(uint32_t* time) {
     updateOperationTimer(*time - last_timer_time);
     last_timer_time = *time;
     if (*time - last_operation_time >= OP_CHECK_INTERVAL) {
+      if (!showing_time) {
+        updateScreen();
+      }
+
       // TODO add proper control using relay method
       if (termoresistor_temp >= temperature) {
         setHeating(false);
@@ -373,25 +397,25 @@ svoid updateOperationControl(uint32_t* time) {
 }
 
 svoid updateOperationTimer(uint16_t time_passed) {
-    if (time_passed <= operation_minute_countdown) {
-      operation_minute_countdown -= time_passed;
-    } else {
-        if (time_minutes <= 0) {
-          if (time_hours <= 0) {
-            action_perfomed = true;
-            stopOperation();
-            return;
-          }
-
-          time_hours--;
-          time_minutes = 60; // Minutes in one hours
+  if (time_passed <= operation_minute_countdown) {
+    operation_minute_countdown -= time_passed;
+  } else {
+      if (time_minutes <= 0) {
+        if (time_hours <= 0) {
+          action_perfomed = true;
+          stopOperation();
+          return;
         }
 
-        time_minutes--;
-        time_passed = time_passed - operation_minute_countdown;
-        operation_minute_countdown = time_passed + ((uint16_t)1000 * 60); // Added rest of millis to times
-        updateScreen();
-    }
+        time_hours--;
+        time_minutes = 60; // Minutes in one hours
+      }
+
+      time_minutes--;
+      time_passed = time_passed - operation_minute_countdown;
+      operation_minute_countdown = time_passed + ((uint16_t)1000 * 60); // Added rest of millis to times
+      updateScreen();
+  }
 }
 
 svoid setHeating(bool enabled) {

@@ -98,6 +98,24 @@ class Display {
         }
 
         /**
+         * Will display float number, only positive
+         * @param number number to display
+         * @param precision is how much dots will display after
+        */
+        void setFloat(float number, uint8_t precision = 1) {
+            // Implementation is limited to size of number, but currently I'm ok with it.
+            uint16_t num = (uint16_t) abs(floor(number * precision * 10));
+            if (num == 0) {
+                this->setDecimal(100);
+                this->updateDigitSegments(0, 1);
+            } else {
+                this->setDecimal(num);
+            }
+
+            this->updateDigitSegments(SEG_DP, this->length - 1 - precision, false);
+        }
+
+        /**
          * @param set if true (default) will set value, otherwise use OR operation
         */
         void updateDigitSegments(uint8_t segments, uint8_t position, bool set = true) {

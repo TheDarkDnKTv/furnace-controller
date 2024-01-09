@@ -1,4 +1,4 @@
-#define SLEEP_TIMEOUT           20000 // Miliseconds
+#define SLEEP_TIMEOUT           20000 // Milliseconds
 #define LONG_PRESS_INTERVAL     400   // Milliseconds
 #define OP_CHECK_INTERVAL       500   // Milliseconds
 #define TERMOMETER_THRESHOLD    30    // Degrees celsuium (3.0C)
