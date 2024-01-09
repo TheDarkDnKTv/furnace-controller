@@ -4,15 +4,16 @@
 
 #define TEMPERATURE_TABLE_STEP  -50     // -5.0C
 #define TEMPERATURE_MAX         2000    // 200.0C
-#define TEMPERATURE_MIN         250     // 25.0C
+#define TEMPERATURE_MIN         0       // 0.0C
 
-// 25 - 200 C
+// 0 - 200 C
 const uint16_t termo_table[] PROGMEM = {
     1012, 1011, 1009, 1008, 1006, 1004, 1002, 1000,
     997, 994, 990, 986, 982, 976, 970, 963,
     955, 946, 935, 922, 908, 891, 872, 850,
     824, 795, 763, 726, 685, 640, 591, 540,
-    486, 431, 376, 323
+    486, 431, 376, 323, 272, 225, 183, 147,
+    115
 };
 
 class ToshibaSensor : public Sensor {

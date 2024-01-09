@@ -10,7 +10,7 @@
  * 
  * All settings are located in settings.hh file
  * 
- * @version 1.0
+ * @version 1.1
  * @author TheDarkDnKTv
  * @since 2024/01/09
 */
