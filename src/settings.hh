@@ -1,8 +1,8 @@
 #define SLEEP_TIMEOUT           20000 // Milliseconds
 #define LONG_PRESS_INTERVAL     400   // Milliseconds
-#define OP_CHECK_INTERVAL       3000  // Milliseconds
+#define OP_CHECK_INTERVAL       5000  // Milliseconds
 #define OP_TEMP_HYSTERESIS      30    // Degrees celsuium (1.5C)
-#define OP_TEMP_CONTROL_RATIO   200.0   // k (relay control algorithm)
+#define OP_TEMP_CONTROL_RATIO   25    // k (relay control algorithm)
 #define NEED_COOLING_FROM       500   // If temp more than (50.0C) will cooldown 
 
 #define MIN_TEMP                250     // 25.0
@@ -28,7 +28,7 @@
 #define DRIVER_MAIN_RELAY       8
 #define DRIVER_FAN              9
 #define DRIVER_HEATER_TOP       10
-#define DRIVER_HEATER_BOTTOM    11
+#define DRIVER_HEATER_BOTTOM    10 /*11*/ // Disabled if same pin
 #define POWER_STANDBY           12
 
 #define HEATING_INDICATOR       LED_BUILTIN

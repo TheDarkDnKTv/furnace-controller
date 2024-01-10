@@ -10,7 +10,7 @@
  * 
  * All settings are located in settings.hh file
  * 
- * @version 1.1
+ * @version 1.2
  * @author TheDarkDnKTv
  * @since 2024/01/09
 */
@@ -403,23 +403,56 @@ svoid updateOperationControl(uint32_t* time) {
     updateOperationTimer(*time - last_timer_time);
     last_timer_time = *time;
     if (*time - last_operation_time >= OP_CHECK_INTERVAL) {
+      last_operation_time = *time;
       if (!showing_time) {
         updateScreen();
       }
       
       static uint16_t previous_temperature = termoresistor_temp;
-      float rate = ((int32_t)termoresistor_temp - (int32_t)previous_temperature) / (OP_CHECK_INTERVAL / 1000.0);
+      static bool heater_throttling = false;
+      static int8_t heater_delay = 0;
+
+      int16_t rate = (int16_t)termoresistor_temp - (int16_t)previous_temperature;
       previous_temperature = termoresistor_temp;
-      float change_mod = rate < 0 ? (OP_TEMP_CONTROL_RATIO / 10.0) : OP_TEMP_CONTROL_RATIO; // cooling way slower than heating
-      int16_t expected_temp = termoresistor_temp + (int16_t) round(rate * change_mod);
+
+      int16_t change_mod = rate < 0 ? (OP_TEMP_CONTROL_RATIO / 3) : OP_TEMP_CONTROL_RATIO; // cooling way slower than heating
+      int16_t expected_temp = termoresistor_temp + rate * change_mod;
       int8_t signal = (
         (int8_t)signum(expected_temp - (int16_t)temperature - OP_TEMP_HYSTERESIS / 2) +
         (int8_t)signum(expected_temp - (int16_t)temperature + OP_TEMP_HYSTERESIS / 2)
       ) / 2;
 
+      if (signal <= 0) {
+        // Do throttle if heater enabled and temperature haven't been changed for some cycles
+        if (heater_throttling) {
+          heater_throttling = --heater_delay > -3;
+          if (!heater_throttling)
+            heater_delay = 0;
+        } else {
+          if (rate <= 2) { // lower than 0.2C per interval
+            heater_throttling = ++heater_delay >= 4;
+          } else {
+            heater_delay = 0;
+          }
+        }
+      } else {
+        heater_throttling = false;
+        heater_delay = 0;
+      }
+
+      if (heater_throttling) {
+        signal = 1;
+      }
+
       #ifdef DEBUG
-        Serial.print("Rate: ");
-        Serial.println(rate);
+        Serial.print("Set: ");
+        Serial.print(temperature / 10.0);
+        Serial.print(" # Expected: ");
+        Serial.print(expected_temp / 10.0);
+        Serial.print(" # Rate: ");
+        Serial.print(rate / 10.0);
+        Serial.print(" # throttle: ");
+        Serial.println(heater_throttling);
       #endif
 
       if (signal == 1) {
@@ -427,8 +460,6 @@ svoid updateOperationControl(uint32_t* time) {
       } else if (signal == -1) {
         setHeating(true);
       }
-
-      last_operation_time = *time;
     }
   } else if (STATE == COOLING) {
     if (termoresistor_temp <= NEED_COOLING_FROM) {
