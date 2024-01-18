@@ -15,6 +15,8 @@
  * @since 2024/01/09
 */
 
+#define useFan() temperature > FAN_ENABLE_TEMP
+
 Display display = Display(1000);
 Sensor* sensor;
 
@@ -395,7 +397,7 @@ static inline int8_t signum(int16_t val) {
 
 svoid updateOperationControl(uint32_t* time) {
   if (STATE == IN_OPERATION) {
-    if (millis() - last_fan_switch >= 30) {
+    if (useFan() && millis() - last_fan_switch >= 30) {
       last_fan_switch = millis() - 15;
       digitalWrite(DRIVER_FAN, !digitalRead(DRIVER_FAN));
     }
@@ -512,7 +514,9 @@ svoid setHeating(bool enabled) {
 svoid setAuxiliaryHardware(bool enabled) {
   digitalWrite(DRIVER_MAIN_RELAY, enabled);
   digitalWrite(POWER_STANDBY, enabled);
-  digitalWrite(DRIVER_FAN, enabled);
+  if (!enabled || useFan()) {
+    digitalWrite(DRIVER_FAN, enabled);
+  }
 }
 
 svoid resetBlinking() {

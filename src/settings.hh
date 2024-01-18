@@ -16,6 +16,8 @@
 #define TIME_MINUTES_MAX        60
 #define TIME_CHANGE_STEP_FAST   10
 
+#define FAN_ENABLE_TEMP         700   // If temp is higher than this, cooling will be enabled
+
 /* PINS */
 #define CONTROL_RIGHT       7
 #define CONTROL_CENTER      3 // Interruptable PIN only
