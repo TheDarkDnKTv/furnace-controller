@@ -50,7 +50,7 @@ class Display {
             this->length = lenght;
 
             free(this->segments);
-            this->segments = (uint8_t*) calloc(4, sizeof(uint8_t));
+            this->segments = (uint8_t*) calloc(length, sizeof(uint8_t));
             if (this->segments == nullptr) {
                 #ifdef DEBUG
                     Serial.println("ERR malloc failed: setSegments()");
