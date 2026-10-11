@@ -513,7 +513,7 @@ svoid setHeating(bool enabled) {
 
 svoid setAuxiliaryHardware(bool enabled) {
   digitalWrite(DRIVER_MAIN_RELAY, enabled);
-  digitalWrite(POWER_STANDBY, enabled);
+  setPowerStandby(enabled);
   if (!enabled || useFan()) {
     digitalWrite(DRIVER_FAN, enabled);
   }
@@ -530,6 +530,19 @@ svoid resetBlinking() {
 
 svoid setCooling(bool enabled) {
   digitalWrite(DRIVER_MAIN_RELAY, 0);
-  digitalWrite(POWER_STANDBY, enabled);
+  setPowerStandby(enabled);
   digitalWrite(DRIVER_FAN, enabled);
+}
+
+/**
+ * Released means high impedance, not driven LOW, so the main board decides
+ * about power exactly as it did when this pin was only a pull-up
+ */
+svoid setPowerStandby(bool enabled) {
+  if (enabled) {
+    digitalWrite(POWER_STANDBY, HIGH);
+    pinMode(POWER_STANDBY, OUTPUT);
+  } else {
+    pinMode(POWER_STANDBY, INPUT);
+  }
 }

@@ -50,4 +50,6 @@ svoid setAuxiliaryHardware(bool enabled);
 
 svoid setCooling(bool enabled);
 
+svoid setPowerStandby(bool enabled);
+
 svoid resetBlinking();
