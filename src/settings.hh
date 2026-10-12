@@ -1,6 +1,6 @@
 #define VERSION_MAJOR           1
-#define VERSION_MINOR           1
-#define VERSION_PATCH           4
+#define VERSION_MINOR           2
+#define VERSION_PATCH           0
 #define VERSION_DISPLAY_TIME    1000  // Milliseconds, shown once on boot
 
 #define SLEEP_TIMEOUT           20000 // Milliseconds
@@ -24,6 +24,7 @@
 
 #define MIN_TEMP                250     // 25.0
 #define MAX_TEMP                1000    // 100.0
+#define TEMP_CHANGE_STEP_FINE   10      // 1.0, toggled by double-clicking MAIN on the temperature screen
 #define TEMP_CHANGE_STEP        50      // 5.0
 #define TEMP_CHANGE_STEP_FAST   250     // 25.0
 

@@ -11,7 +11,7 @@
  * 
  * All settings are located in settings.hh file
  * 
- * @version 1.1.4
+ * @version 1.2.0
  * @author TheDarkDnKTv
  * @since 2024/01/09
 */
@@ -51,6 +51,7 @@ static bool do_blink = true;
 static uint32_t last_operation_time;
 static uint32_t last_timer_time;
 static bool showing_time = true;
+static bool fine_step = false;
 
 static uint32_t last_fan_switch;
 
@@ -113,6 +114,11 @@ void setup() {
     BTN_MAIN.attachDoubleClick([]{
       if (STATE == IN_OPERATION) {
         showing_time = !showing_time;
+      } else if (STATE == SETTING_TEMP) {
+        fine_step = !fine_step;
+        action_perfomed = true;
+        resetBlinking();
+        updateScreen();
       }
     });
 
@@ -240,6 +246,7 @@ svoid setState(State new_state) {
     }
     case SETTING_TEMP: {
       temperature = MIN_TEMP;
+      fine_step = false;
       updateScreen();
       break;
     }
@@ -308,6 +315,11 @@ svoid updateScreen() {
   switch (STATE) {
     case State::SETTING_TEMP: {
       display.setDecimal(temperature / 10);
+      if (fine_step && !did_blink_off) {
+        display.updateDigitSegments(SEG_DP, 0, false);
+        display.updateDigitSegments(SEG_DP, 3, false);
+      }
+
       break;
     }
     case State::IN_OPERATION:
@@ -373,13 +385,17 @@ svoid updateInputs() {
   BTN_RIGHT.tick();
 }
 
+static inline int16_t temperatureStep() {
+  return fine_step ? TEMP_CHANGE_STEP_FINE : TEMP_CHANGE_STEP;
+}
+
 svoid handleControlClick(Control control) {
   action_perfomed = true;
   resetBlinking();
   switch (control) {
     case Control::LEFT: {
       if (STATE == State::SETTING_TEMP) {
-        temperature = max(MIN_TEMP, temperature - TEMP_CHANGE_STEP);
+        temperature = max(MIN_TEMP, (int16_t) temperature - temperatureStep());
         updateScreen();
       } else if (STATE == State::SETTING_TIMER_HOURS) {
         time_hours = max(TIME_HOURS_DEFAULT, time_hours - 1);
@@ -393,7 +409,7 @@ svoid handleControlClick(Control control) {
     }
     case Control::RIGHT: {
       if (STATE == State::SETTING_TEMP) {
-        temperature = min(MAX_TEMP, temperature + TEMP_CHANGE_STEP);
+        temperature = min(MAX_TEMP, (int16_t) temperature + temperatureStep());
         updateScreen();
       } else if (STATE == State::SETTING_TIMER_HOURS) {
         time_hours = min(TIME_HOURS_MAX, time_hours + 1);
@@ -427,10 +443,11 @@ svoid handleControlClick(Control control) {
 svoid handleChangeLongPress(bool increase) {
   switch (STATE) {
     case State::SETTING_TEMP: {
+      int16_t step = fine_step ? TEMP_CHANGE_STEP : TEMP_CHANGE_STEP_FAST;
       if (increase) {
-        temperature = min(MAX_TEMP, temperature + TEMP_CHANGE_STEP_FAST);
+        temperature = min(MAX_TEMP, (int16_t) temperature + step);
       } else {
-        temperature = max(MIN_TEMP, temperature - TEMP_CHANGE_STEP_FAST);
+        temperature = max(MIN_TEMP, (int16_t) temperature - step);
       }
 
       break;
