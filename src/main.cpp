@@ -11,14 +11,14 @@
  * 
  * All settings are located in settings.hh file
  * 
- * @version 1.1.1
+ * @version 1.1.2
  * @author TheDarkDnKTv
  * @since 2024/01/09
 */
 
 #define useFan() (temperature > FAN_ENABLE_TEMP)
 
-Display display = Display(1000);
+Display display(1000);
 Sensor* sensor;
 
 static OneButton BTN_LEFT;

@@ -23,6 +23,9 @@ class Display {
             free(this->segments);
         };
 
+        Display(const Display&) = delete;
+        Display& operator=(const Display&) = delete;
+
         void update(uint32_t* time) {
             if (segments != nullptr) {
                 if (need_update) {
@@ -47,14 +50,7 @@ class Display {
         void setSegments(const uint8_t segments[], uint8_t lenght) {
             offset = 0;
             need_update = true;
-            this->length = lenght;
-
-            free(this->segments);
-            this->segments = (uint8_t*) calloc(length, sizeof(uint8_t));
-            if (this->segments == nullptr) {
-                #ifdef DEBUG
-                    Serial.println("ERR malloc failed: setSegments()");
-                #endif
+            if (!resize(lenght)) {
                 return;
             }
 
@@ -66,7 +62,7 @@ class Display {
             this->need_update = true;
             
             uint8_t i = 5;
-            uint8_t segments[i];
+            uint8_t segments[5];
             while (number > 0 && i > 0) {
                 segments[i - 1] = display.encodeDigit(number % 10);
                 number /= 10;
@@ -82,10 +78,8 @@ class Display {
                 len = 4;
             }
 
-            if (len != this->length) {
-                free(this->segments);
-                this->length = max(4, len);
-                this->segments = (uint8_t*) calloc(this->length, sizeof(uint8_t));
+            if (!resize(max(4, len))) {
+                return;
             }
 
             arrcpy(
@@ -154,9 +148,34 @@ class Display {
         bool need_update = false;
 
         uint8_t* segments = nullptr;
-        uint8_t length;
-        uint8_t offset;
+        uint8_t length = 0;
+        uint8_t offset = 0;
 
-        uint32_t last_update_time;
+        uint32_t last_update_time = 0;
         uint16_t shift_interval;
+
+        /**
+         * Allocates the new buffer before freeing the old one, so pointer and length never
+         * disagree; on failure blanks the display rather than showing stale content
+         */
+        bool resize(uint8_t new_length) {
+            if (segments != nullptr && new_length == length) {
+                memset(segments, 0, length);
+                return true;
+            }
+
+            uint8_t* resized = (uint8_t*) calloc(new_length, sizeof(uint8_t));
+            if (resized == nullptr) {
+                #ifdef DEBUG
+                    Serial.println("ERR calloc failed: resize()");
+                #endif
+                clear();
+                return false;
+            }
+
+            free(segments);
+            segments = resized;
+            length = new_length;
+            return true;
+        }
 };
