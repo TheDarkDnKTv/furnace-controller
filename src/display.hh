@@ -140,6 +140,10 @@ class Display {
             display.clear();
         }
 
+        uint8_t encodeDigit(uint8_t digit) {
+            return display.encodeDigit(digit);
+        }
+
         void setBrightness(uint8_t brightness) {
             display.setBrightness(brightness, brightness > 0);
         }

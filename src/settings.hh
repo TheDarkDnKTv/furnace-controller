@@ -1,3 +1,8 @@
+#define VERSION_MAJOR           1
+#define VERSION_MINOR           1
+#define VERSION_PATCH           0
+#define VERSION_DISPLAY_TIME    1000  // Milliseconds, shown once on boot
+
 #define SLEEP_TIMEOUT           20000 // Milliseconds
 #define LONG_PRESS_INTERVAL     400   // Milliseconds
 #define OP_CHECK_INTERVAL       5000  // Milliseconds
@@ -7,8 +12,18 @@
 #define SYNC_LOST_TIMEOUT       2500  // Milliseconds without main board pulse before reading sensor on own timer
 #define SENSOR_READ_INTERVAL    500   // Milliseconds, own timer reading interval
 
+#define SENSOR_FAULT_TIMEOUT    10000     // Milliseconds without valid reading before E1
+#define OVERHEAT_MARGIN         100       // 10.0C above setpoint or session's lowest temp before E2
+#define OVERHEAT_ABSOLUTE_TEMP  1200      // 120.0C, E3
+#define FAULT_FAN_TIME          900000UL  // Milliseconds of fan after a fault when hot but sensor lost (15 min)
+#define FAULT_CLEAR_HOLD        3000      // Milliseconds holding LEFT + RIGHT to clear a fault
+#define FAULT_COOLING_HYSTERESIS 20       // 2.0C, fan keeps running until this far below NEED_COOLING_FROM
+
+#define EEPROM_FAULT_CODE       0
+#define EEPROM_SESSION_RUNNING  1
+
 #define MIN_TEMP                250     // 25.0
-#define MAX_TEMP                2000    // 200.0
+#define MAX_TEMP                1000    // 100.0
 #define TEMP_CHANGE_STEP        50      // 5.0
 #define TEMP_CHANGE_STEP_FAST   250     // 25.0
 

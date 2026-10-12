@@ -11,7 +11,7 @@
  * 
  * All settings are located in settings.hh file
  * 
- * @version 1.2
+ * @version 1.1.0
  * @author TheDarkDnKTv
  * @since 2024/01/09
 */
@@ -36,6 +36,13 @@ volatile uint16_t termoresistor_temp = 0;
 volatile bool do_check_temp = false;
 static bool temp_valid = false;
 static uint32_t last_read_time;
+static uint32_t last_valid_read_time;
+static int16_t session_lowest_temp;
+
+static Fault fault = Fault::NONE;
+static uint32_t fault_since;
+static bool fault_hot_at_entry;
+static bool fault_cooling;
 
 static uint32_t display_blink_time;
 static bool did_blink_off = false;
@@ -112,19 +119,36 @@ void setup() {
   display.setBrightness(7);
   display.clear();
 
-  setState(State::INIT);
+  loadStoredFault();
+  if (fault == Fault::NONE) {
+    showVersion();
+    setState(State::INIT);
+  } else {
+    setState(State::FAULT);
+  }
+
   sleep_count_time = millis();
   display_blink_time = millis();
+  enableWatchdog();
 }
 
 void loop() {
+  wdt_reset();
   uint32_t time = millis();
   // Need to check temp ASAP
-  if (STATE == IN_OPERATION || STATE == COOLING) {
+  if (STATE == IN_OPERATION || STATE == COOLING || STATE == FAULT) {
     updateTemperature();
   }
 
+  if (STATE == IN_OPERATION || STATE == COOLING) {
+    checkFaults();
+  }
+
   updateInputs();
+  if (STATE == FAULT) {
+    updateFault();
+  }
+
   updateOperationControl(&time);
 
   if (action_perfomed) {
@@ -132,7 +156,7 @@ void loop() {
     sleep_count_time = time;
   }
 
-  if ((do_blink || STATE == State::IN_OPERATION) && time - display_blink_time >= 500) { 
+  if ((do_blink || STATE == State::IN_OPERATION || STATE == State::FAULT) && time - display_blink_time >= 500) { 
     display_blink_time = time;
     did_blink_off = !did_blink_off;
     updateScreen();
@@ -140,7 +164,7 @@ void loop() {
 
   display.update(&time);
 
-  if (STATE != State::IN_OPERATION && time >= SLEEP_TIMEOUT + sleep_count_time) {
+  if (STATE != State::IN_OPERATION && STATE != State::FAULT && time >= SLEEP_TIMEOUT + sleep_count_time) {
     setState(State::SLEEP);
   }
 }
@@ -177,19 +201,25 @@ svoid setState(State new_state) {
     case SLEEP: {
       shutdownPeripherals();
       delay(50);
+      wdt_disable();
       set_sleep_mode(SLEEP_MODE_PWR_DOWN);
       sleep_mode();
+      enableWatchdog();
       break;
     }
     case IN_OPERATION: {
       if (time_hours <= 0 && time_minutes <= 0) {
         setState(INIT);
+        return;
       }
 
       last_timer_time = last_operation_time = millis();
       operation_minute_countdown = 0;
       temp_valid = false;
+      last_valid_read_time = millis();
+      session_lowest_temp = INT16_MAX;
       sensor->reset();
+      EEPROM.update(EEPROM_SESSION_RUNNING, 1);
       setAuxiliaryHardware(1);
       break;
     }
@@ -200,7 +230,12 @@ svoid setState(State new_state) {
         SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F,
         SEG_E | SEG_F | SEG_D
       }, 4);
+      last_valid_read_time = millis();
       setCooling(1);
+      break;
+    }
+    case FAULT: {
+      updateScreen();
       break;
     }
   }
@@ -227,6 +262,11 @@ svoid updateScreen() {
       display.setDecimal(time_hours * 100 + time_minutes, true);
       break;
     }
+    case State::FAULT: {
+      uint8_t segments[] = { 0, SEG_A | SEG_D | SEG_E | SEG_F | SEG_G, display.encodeDigit((uint8_t) fault), 0 };
+      display.setSegments(segments, 4);
+      break;
+    }
     default: break;
   }
 
@@ -249,6 +289,13 @@ svoid updateScreenBlink() {
       case State::IN_OPERATION: {
         if (showing_time)
           display.updateDigitSegments(SEG_DP, 1, false);
+        break;
+      }
+      case State::FAULT: {
+        for (uint8_t i = 0; i < 4; i++) {
+          display.updateDigitSegments(0, i);
+        }
+
         break;
       }
       default: break;
@@ -389,8 +436,13 @@ svoid shutdownPeripherals() {
 }
 
 svoid stopOperation() {
+  if (STATE == State::FAULT) {
+    return;
+  }
+
   // Disabling hardware devices
   setHeating(0);
+  EEPROM.update(EEPROM_SESSION_RUNNING, 0);
 
   if (termoresistor_temp > NEED_COOLING_FROM) {
     setState(State::COOLING);  
@@ -419,11 +471,6 @@ svoid updateTemperature() {
       readTemperature(now);
     }
   } else if (now - sync_last_time >= SYNC_LOST_TIMEOUT && now - last_read_time >= SENSOR_READ_INTERVAL) {
-    #ifdef SENSOR_TEST
-      Serial.print(F("F,"));
-      Serial.println(now);
-    #endif
-
     readTemperature(now);
   }
 }
@@ -434,16 +481,144 @@ svoid readTemperature(uint32_t now) {
   if (reading.ok()) {
     termoresistor_temp = reading.temperature;
     temp_valid = true;
+    last_valid_read_time = now;
+    if (reading.temperature < session_lowest_temp) {
+      session_lowest_temp = reading.temperature;
+    }
+  }
+}
+
+svoid showVersion() {
+  uint8_t segments[] = {
+    0,
+    (uint8_t) (display.encodeDigit(VERSION_MAJOR) | SEG_DP),
+    (uint8_t) (display.encodeDigit(VERSION_MINOR) | SEG_DP),
+    display.encodeDigit(VERSION_PATCH)
+  };
+  uint32_t now = millis();
+  display.setSegments(segments, 4);
+  display.update(&now);
+  delay(VERSION_DISPLAY_TIME);
+}
+
+svoid enableWatchdog() {
+  wdt_enable(WDTO_2S);
+  WDTCSR |= _BV(WDIE);
+}
+
+/**
+ * The first watchdog timeout runs this instead of resetting: last chance to cut
+ * the heater and record E5 before forcing the reset
+ */
+ISR(WDT_vect) {
+  digitalWrite(DRIVER_HEATER_TOP, 0);
+  digitalWrite(DRIVER_HEATER_BOTTOM, 0);
+  digitalWrite(HEATING_INDICATOR, 0);
+  digitalWrite(DRIVER_MAIN_RELAY, 0);
+  EEPROM.update(EEPROM_FAULT_CODE, (uint8_t) Fault::WATCHDOG);
+  EEPROM.update(EEPROM_SESSION_RUNNING, 0);
+  wdt_enable(WDTO_15MS);
+  while (true) {
+  }
+}
+
+/**
+ * A session still marked as running at boot means power was lost mid-session
+ */
+svoid loadStoredFault() {
+  uint8_t code = EEPROM.read(EEPROM_FAULT_CODE);
+  if (code == 0xFF) {
+    code = (uint8_t) Fault::NONE;
   }
 
-  #ifdef SENSOR_TEST
-    if (!reading.ok()) {
-      Serial.print(F("X,"));
-      Serial.print(now);
-      Serial.print(',');
-      Serial.println((uint8_t) reading.status);
-    }
-  #endif
+  if (code == (uint8_t) Fault::NONE && EEPROM.read(EEPROM_SESSION_RUNNING) == 1) {
+    code = (uint8_t) Fault::POWER_LOSS;
+    EEPROM.update(EEPROM_FAULT_CODE, code);
+  }
+
+  EEPROM.update(EEPROM_SESSION_RUNNING, 0);
+  fault = (Fault) code;
+  fault_since = millis();
+  fault_hot_at_entry = false;
+  fault_cooling = false;
+}
+
+svoid checkFaults() {
+  uint32_t now = millis();
+  if (now - last_valid_read_time > SENSOR_FAULT_TIMEOUT) {
+    enterFault(Fault::SENSOR_LOST);
+    return;
+  }
+
+  if (!temp_valid) {
+    return;
+  }
+
+  int16_t temp = termoresistor_temp;
+  int16_t overheat_limit = max((int16_t) temperature, session_lowest_temp) + OVERHEAT_MARGIN;
+  if (temp > OVERHEAT_ABSOLUTE_TEMP) {
+    enterFault(Fault::OVERHEAT_ABSOLUTE);
+  } else if (STATE == State::IN_OPERATION && temp > overheat_limit) {
+    enterFault(Fault::OVERHEAT);
+  }
+}
+
+/**
+ * EEPROM is written before releasing standby, as releasing it may cut our own power
+ */
+svoid enterFault(Fault code) {
+  setHeating(0);
+  digitalWrite(DRIVER_MAIN_RELAY, 0);
+  EEPROM.update(EEPROM_FAULT_CODE, (uint8_t) code);
+  EEPROM.update(EEPROM_SESSION_RUNNING, 0);
+  fault = code;
+  fault_since = millis();
+  fault_hot_at_entry = temp_valid && termoresistor_temp > NEED_COOLING_FROM;
+  fault_cooling = fault_hot_at_entry;
+  setPowerStandby(fault_cooling);
+  digitalWrite(DRIVER_FAN, fault_cooling);
+  setState(State::FAULT);
+}
+
+/**
+ * Keeps the fan on while hot to protect the power supply; with no sensor, runs it
+ * for a fixed time if the last good reading was hot
+ */
+svoid updateFault() {
+  uint32_t now = millis();
+  bool sensor_lost = !temp_valid || now - last_valid_read_time > SENSOR_FAULT_TIMEOUT;
+  bool cooling;
+  if (sensor_lost) {
+    cooling = fault_hot_at_entry && now - fault_since < FAULT_FAN_TIME;
+  } else {
+    int16_t threshold = fault_cooling ? NEED_COOLING_FROM - FAULT_COOLING_HYSTERESIS : NEED_COOLING_FROM;
+    cooling = (int16_t) termoresistor_temp > threshold;
+  }
+
+  if (cooling != fault_cooling) {
+    fault_cooling = cooling;
+    setPowerStandby(cooling);
+    digitalWrite(DRIVER_FAN, cooling);
+  }
+
+  if (
+    BTN_LEFT.isLongPressed() && BTN_RIGHT.isLongPressed() &&
+    BTN_LEFT.getPressedMs() >= FAULT_CLEAR_HOLD && BTN_RIGHT.getPressedMs() >= FAULT_CLEAR_HOLD
+  ) {
+    clearFault();
+  }
+}
+
+svoid clearFault() {
+  EEPROM.update(EEPROM_FAULT_CODE, (uint8_t) Fault::NONE);
+  fault = Fault::NONE;
+  action_perfomed = true;
+  if (fault_cooling) {
+    setState(State::COOLING);
+  } else {
+    setAuxiliaryHardware(0);
+    setState(State::INIT);
+  }
 }
 
 static inline int8_t signum(int16_t val) {

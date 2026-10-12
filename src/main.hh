@@ -1,5 +1,7 @@
 #include <Arduino.h>
 #include <avr/sleep.h>
+#include <avr/wdt.h>
+#include <EEPROM.h>
 
 #define svoid static void
 
@@ -11,7 +13,20 @@ enum State {
     SETTING_TIMER_HOURS,
     SETTING_TIMER_MINUTES,
     IN_OPERATION,
-    COOLING
+    COOLING,
+    FAULT
+};
+
+/**
+ * Values are the codes shown on the display and stored in EEPROM
+ */
+enum class Fault : uint8_t {
+    NONE = 0,
+    SENSOR_LOST = 1,
+    OVERHEAT = 2,
+    OVERHEAT_ABSOLUTE = 3,
+    POWER_LOSS = 4,
+    WATCHDOG = 5
 };
 
 enum Control {
@@ -35,6 +50,20 @@ svoid updateInputs();
 svoid shutdownPeripherals();
 
 svoid stopOperation();
+
+svoid showVersion();
+
+svoid enableWatchdog();
+
+svoid loadStoredFault();
+
+svoid checkFaults();
+
+svoid enterFault(Fault code);
+
+svoid updateFault();
+
+svoid clearFault();
 
 svoid updateScreen();
 
