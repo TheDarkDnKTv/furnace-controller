@@ -11,12 +11,12 @@
  * 
  * All settings are located in settings.hh file
  * 
- * @version 1.1.0
+ * @version 1.1.1
  * @author TheDarkDnKTv
  * @since 2024/01/09
 */
 
-#define useFan() temperature > FAN_ENABLE_TEMP
+#define useFan() (temperature > FAN_ENABLE_TEMP)
 
 Display display = Display(1000);
 Sensor* sensor;
@@ -31,6 +31,7 @@ volatile uint32_t sleep_count_time;
 
 volatile uint8_t sync_tryies = 4;
 volatile uint16_t sync_period = 0;
+volatile uint16_t sync_full_period = 0;
 volatile uint32_t temp_sync_last_time = 0;
 volatile uint16_t termoresistor_temp = 0;
 volatile bool do_check_temp = false;
@@ -52,6 +53,11 @@ static uint32_t last_timer_time;
 static bool showing_time = true;
 
 static uint32_t last_fan_switch;
+
+#ifdef DEBUG
+  static bool sync_reported = false;
+  static uint16_t last_cooling_report;
+#endif
 
 uint16_t temperature = MIN_TEMP;
 uint8_t time_hours = TIME_HOURS_DEFAULT;
@@ -135,6 +141,15 @@ void setup() {
 void loop() {
   wdt_reset();
   uint32_t time = millis();
+  #ifdef DEBUG
+    if (!sync_reported && sync_tryies == 0) {
+      sync_reported = true;
+      Serial.print("Temperature sync done, period: ");
+      Serial.print(sync_full_period);
+      Serial.println("ms");
+    }
+  #endif
+
   // Need to check temp ASAP
   if (STATE == IN_OPERATION || STATE == COOLING || STATE == FAULT) {
     updateTemperature();
@@ -164,7 +179,7 @@ void loop() {
 
   display.update(&time);
 
-  if (STATE != State::IN_OPERATION && STATE != State::FAULT && time >= SLEEP_TIMEOUT + sleep_count_time) {
+  if (STATE != State::IN_OPERATION && STATE != State::FAULT && time - sleep_count_time >= SLEEP_TIMEOUT) {
     setState(State::SLEEP);
   }
 }
@@ -205,6 +220,9 @@ svoid setState(State new_state) {
       set_sleep_mode(SLEEP_MODE_PWR_DOWN);
       sleep_mode();
       enableWatchdog();
+      sleep_count_time = millis();
+      attachInterrupt(0, handleSync, FALLING);
+      setState(State::INIT);
       break;
     }
     case IN_OPERATION: {
@@ -231,6 +249,10 @@ svoid setState(State new_state) {
         SEG_E | SEG_F | SEG_D
       }, 4);
       last_valid_read_time = millis();
+      #ifdef DEBUG
+        last_cooling_report = 0;
+      #endif
+
       setCooling(1);
       break;
     }
@@ -352,7 +374,9 @@ svoid handleControlClick(Control control) {
       } else if (STATE == State::SETTING_TIMER_HOURS) {
         setState(State::SETTING_TIMER_MINUTES);
       } else if (STATE == State::SETTING_TIMER_MINUTES) {
-        setState(State::IN_OPERATION);
+        if (time_hours > 0 || time_minutes > 0) {
+          setState(State::IN_OPERATION);
+        }
       }
       break;
     }
@@ -396,15 +420,10 @@ svoid handleChangeLongPress(bool increase) {
   action_perfomed = true;
 }
 
+/**
+ * Only wakes the CPU from deep sleep, the wake-up work runs right after sleep_mode()
+ */
 svoid handleInterrupt() {
-  noInterrupts();
-  if (STATE == State::SLEEP) {
-    sleep_count_time = millis();
-    attachInterrupt(0, handleSync, FALLING);
-    setState(State::INIT);
-  }
-
-  interrupts();
 }
 
 svoid handleSync() {
@@ -419,11 +438,7 @@ svoid handleSync() {
     temp_sync_last_time = millis();
     if (sync_tryies <= 0) {
       sync_period /= 4;
-      #ifdef DEBUG
-        Serial.print("Temperature sync done, period: ");
-        Serial.print(sync_period);
-        Serial.println("ms");
-      #endif
+      sync_full_period = sync_period;
       sync_period /= 2 * 3; // 1/3 of half period
     }
   }
@@ -632,8 +647,9 @@ svoid updateOperationControl(uint32_t* time) {
       digitalWrite(DRIVER_FAN, !digitalRead(DRIVER_FAN));
     }
 
-    updateOperationTimer(*time - last_timer_time);
-    last_timer_time = *time;
+    uint32_t now = millis();
+    updateOperationTimer(now - last_timer_time);
+    last_timer_time = now;
     if (temp_valid && *time - last_operation_time >= OP_CHECK_INTERVAL) {
       last_operation_time = *time;
       if (!showing_time) {
@@ -699,8 +715,11 @@ svoid updateOperationControl(uint32_t* time) {
       setState(INIT);
     } else {
       #ifdef DEBUG
-      Serial.print("Cooling: ");
-      Serial.println(termoresistor_temp);
+        if (termoresistor_temp != last_cooling_report) {
+          last_cooling_report = termoresistor_temp;
+          Serial.print("Cooling: ");
+          Serial.println(termoresistor_temp);
+        }
       #endif
     }
 
@@ -725,7 +744,7 @@ svoid updateOperationTimer(uint16_t time_passed) {
 
       time_minutes--;
       time_passed = time_passed - operation_minute_countdown;
-      operation_minute_countdown = time_passed + ((uint16_t)1000 * 60); // Added rest of millis to times
+      operation_minute_countdown = 60000 - time_passed; // Overshoot already belongs to the next minute
       updateScreen();
   }
 }
