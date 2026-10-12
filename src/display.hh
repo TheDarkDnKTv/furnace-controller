@@ -26,15 +26,15 @@ class Display {
         Display(const Display&) = delete;
         Display& operator=(const Display&) = delete;
 
-        void update(uint32_t* time) {
+        void update(uint32_t time) {
             if (segments != nullptr) {
                 if (need_update) {
                     offset = 0;
                     need_update = false;
 
                     display.setSegments(segments, length);
-                } else if (length > 4 && *time - last_update_time >= shift_interval) {
-                    last_update_time = *time;
+                } else if (length > 4 && time - last_update_time >= shift_interval) {
+                    last_update_time = time;
                     if ((++offset + 4) > length) {
                         offset = 0;
                     }

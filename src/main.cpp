@@ -11,7 +11,7 @@
  * 
  * All settings are located in settings.hh file
  * 
- * @version 1.1.3
+ * @version 1.1.4
  * @author TheDarkDnKTv
  * @since 2024/01/09
 */
@@ -53,6 +53,12 @@ static uint32_t last_timer_time;
 static bool showing_time = true;
 
 static uint32_t last_fan_switch;
+
+/**
+ * The only "now" for main-loop code, taken once per iteration so a timestamp stored
+ * during the iteration can never be newer than the time it is later compared against
+ */
+static uint32_t loop_time;
 
 #ifdef DEBUG
   static bool sync_reported = false;
@@ -138,9 +144,19 @@ void setup() {
   enableWatchdog();
 }
 
+#ifdef LOOP_TIMING
+  static uint32_t timing_sum_us = 0;
+  static uint32_t timing_max_us = 0;
+  static uint16_t timing_count = 0;
+  static uint32_t timing_report_time = 0;
+#endif
+
 void loop() {
   wdt_reset();
-  uint32_t time = millis();
+  loop_time = millis();
+  #ifdef LOOP_TIMING
+    uint32_t timing_start_us = micros();
+  #endif
   #ifdef DEBUG
     if (!sync_reported && sync_tryies == 0) {
       sync_reported = true;
@@ -164,22 +180,46 @@ void loop() {
     updateFault();
   }
 
-  updateOperationControl(&time);
+  updateOperationControl();
 
   if (action_perfomed) {
     resetBlinking();
-    sleep_count_time = time;
+    sleep_count_time = loop_time;
   }
 
-  if ((do_blink || STATE == State::IN_OPERATION || STATE == State::FAULT) && time - display_blink_time >= 500) { 
-    display_blink_time = time;
+  if ((do_blink || STATE == State::IN_OPERATION || STATE == State::FAULT) && loop_time - display_blink_time >= 500) { 
+    display_blink_time = loop_time;
     did_blink_off = !did_blink_off;
     updateScreen();
   }
 
-  display.update(&time);
+  display.update(loop_time);
 
-  if (STATE != State::IN_OPERATION && STATE != State::FAULT && time - sleep_count_time >= SLEEP_TIMEOUT) {
+  #ifdef LOOP_TIMING
+    uint32_t timing_us = micros() - timing_start_us;
+    timing_sum_us += timing_us;
+    timing_count++;
+    if (timing_us > timing_max_us) {
+      timing_max_us = timing_us;
+    }
+
+    if (loop_time - timing_report_time >= 5000) {
+      Serial.print(F("L,state="));
+      Serial.print(STATE);
+      Serial.print(F(",n="));
+      Serial.print(timing_count);
+      Serial.print(F(",avg_us="));
+      Serial.print(timing_sum_us / timing_count);
+      Serial.print(F(",max_us="));
+      Serial.println(timing_max_us);
+      timing_report_time = loop_time;
+      timing_sum_us = 0;
+      timing_max_us = 0;
+      timing_count = 0;
+    }
+  #endif
+
+  if (STATE != State::IN_OPERATION && STATE != State::FAULT && loop_time - sleep_count_time >= SLEEP_TIMEOUT) {
     setState(State::SLEEP);
   }
 }
@@ -220,7 +260,8 @@ svoid setState(State new_state) {
       set_sleep_mode(SLEEP_MODE_PWR_DOWN);
       sleep_mode();
       enableWatchdog();
-      sleep_count_time = millis();
+      loop_time = millis();
+      sleep_count_time = loop_time;
       attachInterrupt(0, handleSync, FALLING);
       setState(State::INIT);
       break;
@@ -231,10 +272,10 @@ svoid setState(State new_state) {
         return;
       }
 
-      last_timer_time = last_operation_time = millis();
+      last_timer_time = last_operation_time = loop_time;
       operation_minute_countdown = 0;
       temp_valid = false;
-      last_valid_read_time = millis();
+      last_valid_read_time = loop_time;
       session_lowest_temp = INT16_MAX;
       sensor->reset();
       EEPROM.update(EEPROM_SESSION_RUNNING, 1);
@@ -248,7 +289,7 @@ svoid setState(State new_state) {
         SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F,
         SEG_E | SEG_F | SEG_D
       }, 4);
-      last_valid_read_time = millis();
+      last_valid_read_time = loop_time;
       #ifdef DEBUG
         last_cooling_report = 0;
       #endif
@@ -468,7 +509,9 @@ svoid stopOperation() {
 }
 
 /**
- * Reads right after a main board pulse when pulses come, on own timer when they stop
+ * Reads right after a main board pulse when pulses come, on own timer when they stop.
+ * The pulse time comes from the ISR and can be newer than loop_time, so it is compared
+ * against a fresh millis() read together with it
  */
 svoid updateTemperature() {
   uint32_t now;
@@ -483,20 +526,20 @@ svoid updateTemperature() {
   if (sync_pending) {
     if (now - sync_last_time >= sync_period) {
       do_check_temp = false;
-      readTemperature(now);
+      readTemperature();
     }
   } else if (now - sync_last_time >= SYNC_LOST_TIMEOUT && now - last_read_time >= SENSOR_READ_INTERVAL) {
-    readTemperature(now);
+    readTemperature();
   }
 }
 
-svoid readTemperature(uint32_t now) {
-  last_read_time = now;
+svoid readTemperature() {
+  last_read_time = loop_time;
   SensorReading reading = sensor->read();
   if (reading.ok()) {
     termoresistor_temp = reading.temperature;
     temp_valid = true;
-    last_valid_read_time = now;
+    last_valid_read_time = loop_time;
     if (reading.temperature < session_lowest_temp) {
       session_lowest_temp = reading.temperature;
     }
@@ -510,9 +553,8 @@ svoid showVersion() {
     (uint8_t) (display.encodeDigit(VERSION_MINOR) | SEG_DP),
     display.encodeDigit(VERSION_PATCH)
   };
-  uint32_t now = millis();
   display.setSegments(segments, 4);
-  display.update(&now);
+  display.update(millis());
   delay(VERSION_DISPLAY_TIME);
 }
 
@@ -559,8 +601,7 @@ svoid loadStoredFault() {
 }
 
 svoid checkFaults() {
-  uint32_t now = millis();
-  if (now - last_valid_read_time > SENSOR_FAULT_TIMEOUT) {
+  if (loop_time - last_valid_read_time > SENSOR_FAULT_TIMEOUT) {
     enterFault(Fault::SENSOR_LOST);
     return;
   }
@@ -587,7 +628,7 @@ svoid enterFault(Fault code) {
   EEPROM.update(EEPROM_FAULT_CODE, (uint8_t) code);
   EEPROM.update(EEPROM_SESSION_RUNNING, 0);
   fault = code;
-  fault_since = millis();
+  fault_since = loop_time;
   fault_hot_at_entry = temp_valid && termoresistor_temp > NEED_COOLING_FROM;
   fault_cooling = fault_hot_at_entry;
   setPowerStandby(fault_cooling);
@@ -600,11 +641,10 @@ svoid enterFault(Fault code) {
  * for a fixed time if the last good reading was hot
  */
 svoid updateFault() {
-  uint32_t now = millis();
-  bool sensor_lost = !temp_valid || now - last_valid_read_time > SENSOR_FAULT_TIMEOUT;
+  bool sensor_lost = !temp_valid || loop_time - last_valid_read_time > SENSOR_FAULT_TIMEOUT;
   bool cooling;
   if (sensor_lost) {
-    cooling = fault_hot_at_entry && now - fault_since < FAULT_FAN_TIME;
+    cooling = fault_hot_at_entry && loop_time - fault_since < FAULT_FAN_TIME;
   } else {
     int16_t threshold = fault_cooling ? NEED_COOLING_FROM - FAULT_COOLING_HYSTERESIS : NEED_COOLING_FROM;
     cooling = (int16_t) termoresistor_temp > threshold;
@@ -640,18 +680,17 @@ static inline int8_t signum(int16_t val) {
   return val > 0 ? 1 : (val < 0 ? -1 : 0);
 }
 
-svoid updateOperationControl(uint32_t* time) {
+svoid updateOperationControl() {
   if (STATE == IN_OPERATION) {
-    if (useFan() && millis() - last_fan_switch >= 30) {
-      last_fan_switch = millis() - 15;
+    if (useFan() && loop_time - last_fan_switch >= 30) {
+      last_fan_switch = loop_time - 15;
       digitalWrite(DRIVER_FAN, !digitalRead(DRIVER_FAN));
     }
 
-    uint32_t now = millis();
-    updateOperationTimer(now - last_timer_time);
-    last_timer_time = now;
-    if (temp_valid && *time - last_operation_time >= OP_CHECK_INTERVAL) {
-      last_operation_time = *time;
+    updateOperationTimer(loop_time - last_timer_time);
+    last_timer_time = loop_time;
+    if (temp_valid && loop_time - last_operation_time >= OP_CHECK_INTERVAL) {
+      last_operation_time = loop_time;
       if (!showing_time) {
         updateScreen();
       }
@@ -774,7 +813,7 @@ svoid resetBlinking() {
   }
 
   did_blink_off = false;
-  display_blink_time = millis();
+  display_blink_time = loop_time;
 }
 
 svoid setCooling(bool enabled) {
