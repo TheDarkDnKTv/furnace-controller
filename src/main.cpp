@@ -4,6 +4,7 @@
 #include <sensor.cpp>
 #include <display.hh>
 #include <OneButton.h>
+#include <util/atomic.h>
 
 /**
  * Hardware controller for TOSHIBA furnace
@@ -33,6 +34,8 @@ volatile uint16_t sync_period = 0;
 volatile uint32_t temp_sync_last_time = 0;
 volatile uint16_t termoresistor_temp = 0;
 volatile bool do_check_temp = false;
+static bool temp_valid = false;
+static uint32_t last_read_time;
 
 static uint32_t display_blink_time;
 static bool did_blink_off = false;
@@ -117,9 +120,8 @@ void setup() {
 void loop() {
   uint32_t time = millis();
   // Need to check temp ASAP
-  if ((STATE == IN_OPERATION || STATE == COOLING) && do_check_temp && time - temp_sync_last_time >= sync_period) {
-    termoresistor_temp = sensor->getTemperature();
-    do_check_temp = false;
+  if (STATE == IN_OPERATION || STATE == COOLING) {
+    updateTemperature();
   }
 
   updateInputs();
@@ -186,6 +188,8 @@ svoid setState(State new_state) {
 
       last_timer_time = last_operation_time = millis();
       operation_minute_countdown = 0;
+      temp_valid = false;
+      sensor->reset();
       setAuxiliaryHardware(1);
       break;
     }
@@ -210,7 +214,12 @@ svoid updateScreen() {
     }
     case State::IN_OPERATION:
       if (!showing_time) {
-        display.setFloat(termoresistor_temp / 10.0);
+        if (temp_valid) {
+          display.setFloat(termoresistor_temp / 10.0);
+        } else {
+          display.setSegments((const uint8_t[]) { SEG_G, SEG_G | SEG_DP, SEG_G, SEG_G }, 4);
+        }
+
         return;
       }
     case State::SETTING_TIMER_HOURS:
@@ -391,6 +400,52 @@ svoid stopOperation() {
   }
 }
 
+/**
+ * Reads right after a main board pulse when pulses come, on own timer when they stop
+ */
+svoid updateTemperature() {
+  uint32_t now;
+  uint32_t sync_last_time;
+  bool sync_pending;
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    now = millis();
+    sync_last_time = temp_sync_last_time;
+    sync_pending = do_check_temp;
+  }
+
+  if (sync_pending) {
+    if (now - sync_last_time >= sync_period) {
+      do_check_temp = false;
+      readTemperature(now);
+    }
+  } else if (now - sync_last_time >= SYNC_LOST_TIMEOUT && now - last_read_time >= SENSOR_READ_INTERVAL) {
+    #ifdef SENSOR_TEST
+      Serial.print(F("F,"));
+      Serial.println(now);
+    #endif
+
+    readTemperature(now);
+  }
+}
+
+svoid readTemperature(uint32_t now) {
+  last_read_time = now;
+  SensorReading reading = sensor->read();
+  if (reading.ok()) {
+    termoresistor_temp = reading.temperature;
+    temp_valid = true;
+  }
+
+  #ifdef SENSOR_TEST
+    if (!reading.ok()) {
+      Serial.print(F("X,"));
+      Serial.print(now);
+      Serial.print(',');
+      Serial.println((uint8_t) reading.status);
+    }
+  #endif
+}
+
 static inline int8_t signum(int16_t val) {
   return val > 0 ? 1 : (val < 0 ? -1 : 0);
 }
@@ -404,7 +459,7 @@ svoid updateOperationControl(uint32_t* time) {
 
     updateOperationTimer(*time - last_timer_time);
     last_timer_time = *time;
-    if (*time - last_operation_time >= OP_CHECK_INTERVAL) {
+    if (temp_valid && *time - last_operation_time >= OP_CHECK_INTERVAL) {
       last_operation_time = *time;
       if (!showing_time) {
         updateScreen();

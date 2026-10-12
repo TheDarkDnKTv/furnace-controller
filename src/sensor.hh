@@ -1,6 +1,24 @@
 #include <inttypes.h>
 #pragma once
 
+enum class SensorStatus : uint8_t {
+    OK,
+    TOO_LOW,
+    TOO_HIGH
+};
+
+/**
+ * temperature is only meaningful when ok() is true
+ */
+struct SensorReading {
+    SensorStatus status;
+    int16_t temperature;
+
+    bool ok() const {
+        return status == SensorStatus::OK;
+    }
+};
+
 class Sensor {
         public:
             /**
@@ -11,10 +29,14 @@ class Sensor {
             }
 
             /**
-             * Get current temperature in degrees celsium
-             * @return temperature
+             * Read current temperature in 0.1 degrees celsium
              */
-            virtual int16_t getTemperature();
+            virtual SensorReading read() = 0;
+
+            /**
+             * Forget previous samples, call on session start
+             */
+            virtual void reset() = 0;
 
         protected:
             uint8_t pin;

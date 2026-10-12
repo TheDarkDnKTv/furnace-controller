@@ -3,7 +3,9 @@
 #define OP_CHECK_INTERVAL       5000  // Milliseconds
 #define OP_TEMP_HYSTERESIS      30    // Degrees celsuium (1.5C)
 #define OP_TEMP_CONTROL_RATIO   25    // k (relay control algorithm)
-#define NEED_COOLING_FROM       500   // If temp more than (50.0C) will cooldown 
+#define NEED_COOLING_FROM       500   // If temp more than (50.0C) will cooldown
+#define SYNC_LOST_TIMEOUT       2500  // Milliseconds without main board pulse before reading sensor on own timer
+#define SENSOR_READ_INTERVAL    500   // Milliseconds, own timer reading interval
 
 #define MIN_TEMP                250     // 25.0
 #define MAX_TEMP                2000    // 200.0

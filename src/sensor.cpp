@@ -26,18 +26,18 @@ class ToshibaSensor : public Sensor {
         /**
          * https://aterlux.ru/article/ntcresistor
         */
-        int16_t getTemperature() override {
+        SensorReading read() override {
             uint8_t high_idx = 0;
             uint8_t low_idx = (sizeof(termo_table) / sizeof(termo_table[0])) - 1;
             uint16_t lowest_value = getTempTableValue(low_idx);
             uint16_t cummulitive_reading = analogRead(this->pin);
             if (cummulitive_reading <= lowest_value) {
-                return TEMPERATURE_MIN;
+                return { SensorStatus::TOO_LOW, 0 };
             }
 
             uint16_t highest_value = getTempTableValue(0);
             if (cummulitive_reading >= highest_value) {
-                return TEMPERATURE_MAX;
+                return { SensorStatus::TOO_HIGH, 0 };
             }
 
             // Binary search
@@ -53,7 +53,7 @@ class ToshibaSensor : public Sensor {
 
             uint16_t vl = getTempTableValue(high_idx);
             if (cummulitive_reading >= vl) {
-                return high_idx * TEMPERATURE_TABLE_STEP + TEMPERATURE_MAX;
+                return { SensorStatus::OK, average(high_idx * TEMPERATURE_TABLE_STEP + TEMPERATURE_MAX) };
             }
 
             uint16_t vr = getTempTableValue(low_idx);
@@ -64,29 +64,37 @@ class ToshibaSensor : public Sensor {
                 result -= ((TEMPERATURE_TABLE_STEP * (int32_t)(cummulitive_reading - vr) + (vd >> 1)) / vd);
             }
 
-            this->readings[reading++] = result;
-            if (reading >= READING_COUNT) {
-                reading_init = true;
-                reading = 0;
-            }
+            return { SensorStatus::OK, average(result) };
+        }
 
-            if (reading_init) {
-                result = 0;
-                for (auto i: readings) {
-                    result += i;
-                }
-
-                return result / READING_COUNT;
-            }
-
-            return result;
+        void reset() override {
+            reading = 0;
+            reading_count = 0;
         }
 
     private:
         uint8_t reading = 0;
+        uint8_t reading_count = 0;
         int16_t readings[READING_COUNT];
-        bool reading_init = false;
-    
+
+        int16_t average(int16_t value) {
+            readings[reading++] = value;
+            if (reading >= READING_COUNT) {
+                reading = 0;
+            }
+
+            if (reading_count < READING_COUNT) {
+                reading_count++;
+            }
+
+            int32_t sum = 0;
+            for (uint8_t i = 0; i < reading_count; i++) {
+                sum += readings[i];
+            }
+
+            return sum / reading_count;
+        }
+
         inline uint16_t getTempTableValue(uint8_t idx) {
             return pgm_read_word(&termo_table[idx]);
         }

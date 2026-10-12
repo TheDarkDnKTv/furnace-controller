@@ -40,6 +40,10 @@ svoid updateScreen();
 
 svoid updateScreenBlink();
 
+svoid updateTemperature();
+
+svoid readTemperature(uint32_t now);
+
 svoid updateOperationControl(uint32_t* time);
 
 svoid updateOperationTimer(uint16_t time_passed);
