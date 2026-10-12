@@ -1,6 +1,6 @@
 #define VERSION_MAJOR           1
 #define VERSION_MINOR           1
-#define VERSION_PATCH           2
+#define VERSION_PATCH           3
 #define VERSION_DISPLAY_TIME    1000  // Milliseconds, shown once on boot
 
 #define SLEEP_TIMEOUT           20000 // Milliseconds

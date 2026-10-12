@@ -1,11 +1,13 @@
 #include <Arduino.h>
 #include <avr/pgmspace.h>
 #include <sensor.hh>
+#include <median.hh>
 
 #define TEMPERATURE_TABLE_STEP  -50     // -5.0C
 #define TEMPERATURE_MAX         2000    // 200.0C
 #define TEMPERATURE_MIN         0       // 0.0C
 #define READING_COUNT           8
+#define MEDIAN_COUNT            5
 
 // 0 - 200 C
 const uint16_t termo_table[] PROGMEM = {
@@ -53,7 +55,7 @@ class ToshibaSensor : public Sensor {
 
             uint16_t vl = getTempTableValue(high_idx);
             if (cummulitive_reading >= vl) {
-                return { SensorStatus::OK, average(high_idx * TEMPERATURE_TABLE_STEP + TEMPERATURE_MAX) };
+                return { SensorStatus::OK, filter(high_idx * TEMPERATURE_TABLE_STEP + TEMPERATURE_MAX) };
             }
 
             uint16_t vr = getTempTableValue(low_idx);
@@ -64,21 +66,26 @@ class ToshibaSensor : public Sensor {
                 result -= ((TEMPERATURE_TABLE_STEP * (int32_t)(cummulitive_reading - vr) + (vd >> 1)) / vd);
             }
 
-            return { SensorStatus::OK, average(result) };
+            return { SensorStatus::OK, filter(result) };
         }
 
         void reset() override {
             reading = 0;
             reading_count = 0;
+            median.reset();
         }
 
     private:
         uint8_t reading = 0;
         uint8_t reading_count = 0;
         int16_t readings[READING_COUNT];
+        MedianFilter<MEDIAN_COUNT> median;
 
-        int16_t average(int16_t value) {
-            readings[reading++] = value;
+        /**
+         * Median drops single-sample spikes (lid glitches), the average then smooths noise
+         */
+        int16_t filter(int16_t value) {
+            readings[reading++] = median.add(value);
             if (reading >= READING_COUNT) {
                 reading = 0;
             }
