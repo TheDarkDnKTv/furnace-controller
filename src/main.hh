@@ -81,6 +81,10 @@ svoid readTemperature();
 
 svoid updateOperationControl();
 
+svoid updateHeaterControl();
+
+svoid updateHeldState();
+
 svoid updateOperationTimer(uint16_t time_passed);
 
 svoid setHeating(bool enabled);

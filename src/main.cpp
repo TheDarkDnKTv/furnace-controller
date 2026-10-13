@@ -5,13 +5,14 @@
 #include <display.hh>
 #include <OneButton.h>
 #include <util/atomic.h>
+#include <pid.hh>
 
 /**
  * Hardware controller for TOSHIBA furnace
  * 
  * All settings are located in settings.hh file
  * 
- * @version 1.3.0
+ * @version 1.4.0
  * @author TheDarkDnKTv
  * @since 2024/01/09
 */
@@ -48,13 +49,30 @@ static bool fault_cooling;
 static uint32_t display_blink_time;
 static bool did_blink_off = false;
 static bool do_blink = true;
-static uint32_t last_operation_time;
 static uint32_t last_timer_time;
 static bool showing_time = true;
 static bool fine_step = false;
 static bool editing_setpoint = false;
 static uint16_t edit_setpoint;
 static uint32_t edit_last_action;
+
+static const PidProfile PROFILE = { CTRL_WINDOW_MS, CTRL_KP, CTRL_TI_S, CTRL_I_BAND };
+static PidController controller;
+static float ctrl_duty;
+static uint32_t ctrl_window_start;
+static bool heater_on;
+static bool temperature_held;
+static bool held_timing;
+static uint32_t held_since;
+
+static_assert(OVEN_DEAD_S <= 64, "the predictor keeps 64 seconds of heater history");
+static_assert(OVEN_LAG_S >= 1.0f, "the predictor divides by the lag");
+static const OvenModel OVEN = { OVEN_HEAT_PER_S, OVEN_DEAD_S, OVEN_LAG_S, OVEN_LOSS_PER_S };
+static SmithPredictor predictor;
+static bool predictor_ready;
+static float room_estimate;
+static uint32_t predictor_tick_time;
+static uint8_t blink_cycles;
 
 static uint32_t last_fan_switch;
 
@@ -73,6 +91,13 @@ uint16_t temperature = MIN_TEMP;
 uint8_t time_hours = TIME_HOURS_DEFAULT;
 uint8_t time_minutes = TIME_MINUTES_DEFAULT;
 uint16_t operation_minute_countdown;
+
+/**
+ * While warming up, the screen alternates between time and temperature on its own
+ */
+static inline bool operationShowsTime() {
+  return temperature_held ? showing_time : (blink_cycles / WARMUP_SCREEN_BLINKS) % 2 == 0;
+}
 
 void setup() {
   pinMode(DRIVER_MAIN_RELAY, OUTPUT);
@@ -120,7 +145,7 @@ void setup() {
           fine_step = !fine_step;
           edit_last_action = loop_time;
           updateScreen();
-        } else {
+        } else if (temperature_held) {
           showing_time = !showing_time;
         }
       } else if (STATE == SETTING_TEMP) {
@@ -205,6 +230,10 @@ void loop() {
   if ((do_blink || STATE == State::IN_OPERATION || STATE == State::FAULT) && loop_time - display_blink_time >= 500) { 
     display_blink_time = loop_time;
     did_blink_off = !did_blink_off;
+    if (!did_blink_off) {
+      blink_cycles++;
+    }
+
     updateScreen();
   }
 
@@ -288,7 +317,15 @@ svoid setState(State new_state) {
         return;
       }
 
-      last_timer_time = last_operation_time = loop_time;
+      last_timer_time = loop_time;
+      controller.reset();
+      ctrl_duty = 0;
+      heater_on = false;
+      temperature_held = false;
+      held_timing = false;
+      predictor_ready = false;
+      blink_cycles = 0;
+      ctrl_window_start = loop_time - CTRL_WINDOW_MS;
       operation_minute_countdown = 0;
       temp_valid = false;
       last_valid_read_time = loop_time;
@@ -333,14 +370,14 @@ svoid updateScreen() {
         return;
       }
 
-      if (!showing_time) {
+      if (!operationShowsTime()) {
         if (temp_valid) {
           display.setFloat(termoresistor_temp / 10.0);
         } else {
           display.setSegments((const uint8_t[]) { SEG_G, SEG_G | SEG_DP, SEG_G, SEG_G }, 4);
         }
 
-        return;
+        break;
       }
     case State::SETTING_TIMER_HOURS:
     case State::SETTING_TIMER_MINUTES: {
@@ -380,8 +417,14 @@ svoid updateScreenBlink() {
         break;
       }
       case State::IN_OPERATION: {
-        if (showing_time)
+        if (!temperature_held) {
+          for (uint8_t i = 0; i < 4; i++) {
+            display.updateDigitSegments(0, i);
+          }
+        } else if (showing_time) {
           display.updateDigitSegments(SEG_DP, 1, false);
+        }
+
         break;
       }
       case State::FAULT: {
@@ -491,8 +534,16 @@ svoid finishSetpointEdit() {
       session_lowest_temp = temp_valid ? (int16_t) termoresistor_temp : INT16_MAX;
     }
 
+    if (predictor_ready) {
+      float old_rise = temperature / 10.0f - room_estimate;
+      float new_rise = edit_setpoint / 10.0f - room_estimate;
+      controller.preset(old_rise > 2.0f
+        ? controller.getIntegral() * new_rise / old_rise
+        : holdingDuty(edit_setpoint / 10.0f, room_estimate, OVEN));
+    }
+
     temperature = edit_setpoint;
-    last_operation_time = loop_time - OP_CHECK_INTERVAL;
+    ctrl_window_start = loop_time - CTRL_WINDOW_MS;
     if (!useFan()) {
       digitalWrite(DRIVER_FAN, LOW);
     }
@@ -759,8 +810,81 @@ svoid clearFault() {
   }
 }
 
-static inline int8_t signum(int16_t val) {
-  return val > 0 ? 1 : (val < 0 ? -1 : 0);
+/**
+ * The relay is only on or off, so power is set as the on-share of each window. Heat reaches
+ * the sensor 30-60 s late, so P reacts to the reading plus the heat still on its way, while
+ * I learns from the reading itself
+ */
+svoid updateHeaterControl() {
+  if (!temp_valid) {
+    return;
+  }
+
+  float measured = termoresistor_temp / 10.0f;
+  float setpoint = temperature / 10.0f;
+  if (!predictor_ready) {
+    predictor_ready = true;
+    room_estimate = min(measured, OVEN_ROOM_MAX);
+    predictor.reset(measured, room_estimate);
+    predictor_tick_time = loop_time;
+    controller.preset(holdingDuty(setpoint, room_estimate, OVEN));
+    temperature_held = measured >= setpoint - CTRL_HELD_BAND / 10.0f;
+  }
+
+  while (loop_time - predictor_tick_time >= 1000) {
+    predictor_tick_time += 1000;
+    predictor.tick(heater_on, OVEN);
+  }
+
+  updateHeldState();
+
+  if (loop_time - ctrl_window_start >= CTRL_WINDOW_MS) {
+    ctrl_window_start = loop_time;
+    float predicted = measured + predictor.inTransit();
+    float predicted_mean = measured + predictor.takeMeanInTransit();
+    ctrl_duty = controller.update(setpoint - predicted, setpoint - predicted_mean, PROFILE);
+    #ifdef DEBUG
+      Serial.print(F("C,"));
+      Serial.print(loop_time / 1000);
+      Serial.print(',');
+      Serial.print(setpoint);
+      Serial.print(',');
+      Serial.print(measured);
+      Serial.print(',');
+      Serial.print(predicted);
+      Serial.print(',');
+      Serial.print(predicted_mean);
+      Serial.print(',');
+      Serial.print(ctrl_duty * 100);
+      Serial.print(',');
+      Serial.println(controller.getIntegral() * 100);
+    #endif
+  }
+
+  bool want = loop_time - ctrl_window_start < pulseMs(ctrl_duty, CTRL_WINDOW_MS, CTRL_MIN_PULSE_MS);
+  if (want != heater_on) {
+    heater_on = want;
+    setHeating(want);
+  }
+}
+
+/**
+ * The warm-up display ends once the reading has stayed within the band long enough to
+ * trust that the controller holds it, not at the first crossing
+ */
+svoid updateHeldState() {
+  if (temperature_held) {
+    return;
+  }
+
+  if (abs((int16_t) temperature - (int16_t) termoresistor_temp) > CTRL_HELD_BAND) {
+    held_timing = false;
+  } else if (!held_timing) {
+    held_timing = true;
+    held_since = loop_time;
+  } else if (loop_time - held_since >= CTRL_HELD_MS) {
+    temperature_held = true;
+  }
 }
 
 svoid updateOperationControl() {
@@ -780,65 +904,7 @@ svoid updateOperationControl() {
       return;
     }
 
-    if (temp_valid && loop_time - last_operation_time >= OP_CHECK_INTERVAL) {
-      last_operation_time = loop_time;
-      if (!showing_time) {
-        updateScreen();
-      }
-      
-      static uint16_t previous_temperature = termoresistor_temp;
-      static bool heater_throttling = false;
-      static int8_t heater_delay = 0;
-
-      int16_t rate = (int16_t)termoresistor_temp - (int16_t)previous_temperature;
-      previous_temperature = termoresistor_temp;
-
-      int16_t change_mod = rate < 0 ? (OP_TEMP_CONTROL_RATIO / 3) : OP_TEMP_CONTROL_RATIO; // cooling way slower than heating
-      int16_t expected_temp = termoresistor_temp + rate * change_mod;
-      int8_t signal = (
-        (int8_t)signum(expected_temp - (int16_t)temperature - OP_TEMP_HYSTERESIS / 2) +
-        (int8_t)signum(expected_temp - (int16_t)temperature + OP_TEMP_HYSTERESIS / 2)
-      ) / 2;
-
-      if (signal <= 0) {
-        // Do throttle if heater enabled and temperature haven't been changed for some cycles
-        if (heater_throttling) {
-          heater_throttling = --heater_delay > -3;
-          if (!heater_throttling)
-            heater_delay = 0;
-        } else {
-          if (rate <= 2) { // lower than 0.2C per interval
-            heater_throttling = ++heater_delay >= 4;
-          } else {
-            heater_delay = 0;
-          }
-        }
-      } else {
-        heater_throttling = false;
-        heater_delay = 0;
-      }
-
-      if (heater_throttling) {
-        signal = 1;
-      }
-
-      #ifdef DEBUG
-        Serial.print("Set: ");
-        Serial.print(temperature / 10.0);
-        Serial.print(" # Expected: ");
-        Serial.print(expected_temp / 10.0);
-        Serial.print(" # Rate: ");
-        Serial.print(rate / 10.0);
-        Serial.print(" # throttle: ");
-        Serial.println(heater_throttling);
-      #endif
-
-      if (signal == 1) {
-        setHeating(false);
-      } else if (signal == -1) {
-        setHeating(true);
-      }
-    }
+    updateHeaterControl();
   } else if (STATE == COOLING) {
     if (termoresistor_temp <= NEED_COOLING_FROM) {
       setCooling(0);
