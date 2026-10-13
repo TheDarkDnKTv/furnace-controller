@@ -11,7 +11,7 @@
  * 
  * All settings are located in settings.hh file
  * 
- * @version 1.2.0
+ * @version 1.3.0
  * @author TheDarkDnKTv
  * @since 2024/01/09
 */
@@ -52,6 +52,9 @@ static uint32_t last_operation_time;
 static uint32_t last_timer_time;
 static bool showing_time = true;
 static bool fine_step = false;
+static bool editing_setpoint = false;
+static uint16_t edit_setpoint;
+static uint32_t edit_last_action;
 
 static uint32_t last_fan_switch;
 
@@ -113,7 +116,13 @@ void setup() {
 
     BTN_MAIN.attachDoubleClick([]{
       if (STATE == IN_OPERATION) {
-        showing_time = !showing_time;
+        if (editing_setpoint) {
+          fine_step = !fine_step;
+          edit_last_action = loop_time;
+          updateScreen();
+        } else {
+          showing_time = !showing_time;
+        }
       } else if (STATE == SETTING_TEMP) {
         fine_step = !fine_step;
         action_perfomed = true;
@@ -284,6 +293,7 @@ svoid setState(State new_state) {
       temp_valid = false;
       last_valid_read_time = loop_time;
       session_lowest_temp = INT16_MAX;
+      editing_setpoint = false;
       sensor->reset();
       EEPROM.update(EEPROM_SESSION_RUNNING, 1);
       setAuxiliaryHardware(1);
@@ -314,15 +324,15 @@ svoid setState(State new_state) {
 svoid updateScreen() {
   switch (STATE) {
     case State::SETTING_TEMP: {
-      display.setDecimal(temperature / 10);
-      if (fine_step && !did_blink_off) {
-        display.updateDigitSegments(SEG_DP, 0, false);
-        display.updateDigitSegments(SEG_DP, 3, false);
-      }
-
+      showSetpoint(temperature);
       break;
     }
     case State::IN_OPERATION:
+      if (editing_setpoint) {
+        showSetpoint(edit_setpoint);
+        return;
+      }
+
       if (!showing_time) {
         if (temp_valid) {
           display.setFloat(termoresistor_temp / 10.0);
@@ -346,6 +356,14 @@ svoid updateScreen() {
   }
 
   updateScreenBlink();
+}
+
+svoid showSetpoint(uint16_t value) {
+  display.setDecimal(value / 10);
+  if (fine_step && !did_blink_off) {
+    display.updateDigitSegments(SEG_DP, 0, false);
+    display.updateDigitSegments(SEG_DP, 3, false);
+  }
 }
 
 svoid updateScreenBlink() {
@@ -403,6 +421,8 @@ svoid handleControlClick(Control control) {
       } else if (STATE == State::SETTING_TIMER_MINUTES) {
         time_minutes = max(TIME_MINUTES_DEFAULT, time_minutes - 1);
         updateScreen();
+      } else if (STATE == State::IN_OPERATION) {
+        editSetpoint(-temperatureStep());
       }
 
       break;
@@ -417,6 +437,8 @@ svoid handleControlClick(Control control) {
       } else if (STATE == State::SETTING_TIMER_MINUTES) {
         time_minutes = min(TIME_MINUTES_MAX, time_minutes + 1);
         updateScreen();
+      } else if (STATE == State::IN_OPERATION) {
+        editSetpoint(temperatureStep());
       }
 
       break;
@@ -434,10 +456,49 @@ svoid handleControlClick(Control control) {
         if (time_hours > 0 || time_minutes > 0) {
           setState(State::IN_OPERATION);
         }
+      } else if (STATE == State::IN_OPERATION && editing_setpoint) {
+        finishSetpointEdit();
       }
       break;
     }
   }
+}
+
+/**
+ * The first press only opens the edit screen; the new setpoint applies when it closes
+ */
+svoid editSetpoint(int16_t delta) {
+  if (!editing_setpoint) {
+    editing_setpoint = true;
+    edit_setpoint = temperature;
+    fine_step = false;
+  } else {
+    edit_setpoint = constrain((int16_t) edit_setpoint + delta, MIN_TEMP, MAX_TEMP);
+  }
+
+  edit_last_action = loop_time;
+  updateScreen();
+}
+
+/**
+ * Lowering restarts the E2 reference from the current reading, like a warm start, so a
+ * hot chamber can't trip it; raising needs no reset as the limit follows the setpoint
+ */
+svoid finishSetpointEdit() {
+  editing_setpoint = false;
+  if (edit_setpoint != temperature) {
+    if (edit_setpoint < temperature) {
+      session_lowest_temp = temp_valid ? (int16_t) termoresistor_temp : INT16_MAX;
+    }
+
+    temperature = edit_setpoint;
+    last_operation_time = loop_time - OP_CHECK_INTERVAL;
+    if (!useFan()) {
+      digitalWrite(DRIVER_FAN, LOW);
+    }
+  }
+
+  updateScreen();
 }
 
 svoid handleChangeLongPress(bool increase) {
@@ -450,6 +511,11 @@ svoid handleChangeLongPress(bool increase) {
         temperature = max(MIN_TEMP, (int16_t) temperature - step);
       }
 
+      break;
+    }
+    case State::IN_OPERATION: {
+      int16_t step = fine_step ? TEMP_CHANGE_STEP : TEMP_CHANGE_STEP_FAST;
+      editSetpoint(increase ? step : -step);
       break;
     }
     case State::SETTING_TIMER_HOURS: {
@@ -699,6 +765,10 @@ static inline int8_t signum(int16_t val) {
 
 svoid updateOperationControl() {
   if (STATE == IN_OPERATION) {
+    if (editing_setpoint && loop_time - edit_last_action >= SETPOINT_EDIT_TIMEOUT) {
+      finishSetpointEdit();
+    }
+
     if (useFan() && loop_time - last_fan_switch >= 30) {
       last_fan_switch = loop_time - 15;
       digitalWrite(DRIVER_FAN, !digitalRead(DRIVER_FAN));
@@ -706,6 +776,10 @@ svoid updateOperationControl() {
 
     updateOperationTimer(loop_time - last_timer_time);
     last_timer_time = loop_time;
+    if (STATE != IN_OPERATION) {
+      return;
+    }
+
     if (temp_valid && loop_time - last_operation_time >= OP_CHECK_INTERVAL) {
       last_operation_time = loop_time;
       if (!showing_time) {

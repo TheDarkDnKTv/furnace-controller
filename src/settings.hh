@@ -1,5 +1,5 @@
 #define VERSION_MAJOR           1
-#define VERSION_MINOR           2
+#define VERSION_MINOR           3
 #define VERSION_PATCH           0
 #define VERSION_DISPLAY_TIME    1000  // Milliseconds, shown once on boot
 
@@ -27,6 +27,7 @@
 #define TEMP_CHANGE_STEP_FINE   10      // 1.0, toggled by double-clicking MAIN on the temperature screen
 #define TEMP_CHANGE_STEP        50      // 5.0
 #define TEMP_CHANGE_STEP_FAST   250     // 25.0
+#define SETPOINT_EDIT_TIMEOUT   5000    // Milliseconds without a press before the in-session setpoint screen closes
 
 #define TIME_HOURS_DEFAULT      0
 #define TIME_MINUTES_DEFAULT    0

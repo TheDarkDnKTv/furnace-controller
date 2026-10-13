@@ -69,6 +69,12 @@ svoid updateScreen();
 
 svoid updateScreenBlink();
 
+svoid showSetpoint(uint16_t value);
+
+svoid editSetpoint(int16_t delta);
+
+svoid finishSetpointEdit();
+
 svoid updateTemperature();
 
 svoid readTemperature();
